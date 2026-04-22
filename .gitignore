@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Compiled Swift helpers (rebuilt on first run)
+resources/mac-ax-helper
+resources/mac-ax-watcher
+
+# Local OpenChronicle data (only if symlinked into the repo for dev)
+.openchronicle/
+
+# Ad-hoc logs / scratch
+*.log
+scratch/

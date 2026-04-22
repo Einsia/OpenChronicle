@@ -1,0 +1,68 @@
+[project]
+name = "openchronicle"
+version = "0.1.0"
+description = "Local-first screen-context memory for any LLM agent. Captures AX Tree + screenshots, exposes the result via MCP."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "OpenChronicle contributors" }]
+keywords = ["mcp", "memory", "context", "accessibility", "ax-tree", "agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.7",
+    "litellm>=1.52",
+    "python-frontmatter>=1.1",
+    "mss>=9.0",
+    "Pillow>=10.0",
+    "mcp>=1.0",
+    "httpx[socks]>=0.27",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.scripts]
+openchronicle = "openchronicle.cli:app"
+
+[project.urls]
+Repository = "https://github.com/openchronicle/openchronicle"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openchronicle"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"resources/mac-ax-helper.swift" = "openchronicle/_bundled/mac-ax-helper.swift"
+"resources/build-mac-ax-helper.sh" = "openchronicle/_bundled/build-mac-ax-helper.sh"
+"resources/mac-ax-watcher.swift" = "openchronicle/_bundled/mac-ax-watcher.swift"
+"resources/build-mac-ax-watcher.sh" = "openchronicle/_bundled/build-mac-ax-watcher.sh"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

@@ -25,6 +25,26 @@ The file below already contains the most recent session/flush entries from today
 
 **No duplication with preceding entries.** Do not emit a sub_task whose `[HH:MM-HH:MM, app]` range overlaps the range of a preceding entry for the same activity. This window's sub_tasks should describe *new* activity in `[{start_time}, {end_time})` only.
 
+**Observed-regularity surfacing.** A separate downstream classifier decides what long-term preference / habit / style facts are worth persisting. It is forbidden from inventing claims you did not state, so it depends on *you* to flag behavioral regularities in concrete, quotable form.
+
+Fire this rule when the current window exhibits, or continues, a clearly repeated behavior:
+
+- the same tool is being used for the same kind of task in a way that could generalize (e.g. commit messages all in present tense; Notion for drafts vs Apple Notes for quick captures; always routes work meetings to Google Calendar)
+- a stable working style is directly observable (e.g. 90-minute focus blocks; always opens a terminal with `tmux` before coding; writes all shell scripts with `set -euo pipefail`)
+- a repeated authored-text pattern (e.g. commit messages consistently use `feat:` / `fix:` / `docs:` prefix; PR titles always in English)
+- a declarative statement the user has *typed* in this window stating a preference (e.g. typed "I prefer uv over pip" into Claude or a doc)
+
+When fired, append **one** extra sentence to `summary` beginning with the literal phrase `Observed regularity:` (one per window max; skip if nothing qualifies). Be concrete and groundable — name the behavior, the app(s), and either a count or an explicit "continues X from earlier" reference. Example: `Observed regularity: commit messages in Cursor's git panel were written in present tense in all 3 commits this window ("add mermaid code…", "add contributors", "initial project setup"), matching the same pattern in today's earlier entries.`
+
+Do NOT fire this rule for:
+
+- a single instance with no prior or repeated counterpart
+- inferences ("this suggests the user prefers X") without direct textual evidence
+- transient events (scheduling, one-off appointments, reading a specific doc) — those belong in sub_tasks, not here
+- anything you would hedge with "probably" / "seems to" / "suggests"
+
+If nothing qualifies, omit the sentence. The classifier's default is silence; an unjustified "Observed regularity" line will poison the downstream preferences file.
+
 ## Output
 
 Return a JSON object with exactly these fields:

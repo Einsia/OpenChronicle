@@ -33,7 +33,7 @@ dependencies = [
 openchronicle = "openchronicle.cli:app"
 
 [project.urls]
-Repository = "https://github.com/Einsia/AutoChronicle"
+Repository = "https://github.com/openchronicle/openchronicle"
 
 [build-system]
 requires = ["hatchling"]

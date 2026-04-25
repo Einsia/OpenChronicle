@@ -136,7 +136,7 @@ The core idea is simple:
 Requires **macOS 13+** and **Xcode Command Line Tools** (`xcode-select --install`).
 
 ```bash
-git clone https://github.com/openchronicle/openchronicle.git
+git clone https://github.com/Einsia/OpenChronicle.git
 cd openchronicle
 bash install.sh
 ```

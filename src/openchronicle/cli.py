@@ -113,7 +113,7 @@ def _health_status(pid: int | None, last_ts: str | None) -> tuple[str, str]:
         return "running (no captures yet)", "yellow"
     try:
         last = datetime.fromisoformat(last_ts)
-        age = (datetime.now() - last).total_seconds()
+        age = (datetime.now(last.tzinfo) - last).total_seconds()
     except (ValueError, TypeError):
         return "running", "green"
     if age < 300:  # 5 minutes
@@ -207,7 +207,7 @@ def status() -> None:
     if last_ts and last_app:
         try:
             last_dt = datetime.fromisoformat(last_ts)
-            age = (datetime.now() - last_dt).total_seconds()
+            age = (datetime.now(last_dt.tzinfo) - last_dt).total_seconds()
             if age < 60:
                 ago = "just now"
             elif age < 3600:
@@ -1075,13 +1075,13 @@ def search(
     with fts.cursor() as conn:
         results = []
         # Search entries
-        for row in fts.search(conn, query, limit=limit):
-            results.append(("entry", row.created, row.text_env or row.text_user))
+        for row in fts.search(conn, query=query, top_k=limit):
+            results.append(("entry", row.timestamp, row.content))
 
         # Search captures
         cap_limit = max(5, limit - len(results) // 2)
-        for row in fts.search_captures(conn, query, limit=cap_limit):
-            results.append(("capture", row.timestamp, row.caption))
+        for row in fts.search_captures(conn, query=query, limit=cap_limit):
+            results.append(("capture", row.timestamp, row.window_title))
 
         results = results[:limit]
 

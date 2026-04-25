@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import queue
 import threading
 import time
 from collections.abc import Callable
@@ -173,8 +174,9 @@ def capture_once(
 class _CaptureRunner:
     """Serializes capture_once calls from the watcher thread + heartbeat task.
 
-    Captures happen on a worker thread so the watcher reader thread never
-    blocks on AX / screenshot I/O.
+    Captures execute on a single dedicated worker thread fed by a bounded
+    queue, so the watcher reader thread never blocks on AX / screenshot I/O
+    and a runaway burst of events can never spawn unbounded threads.
 
     Also enforces *consecutive-duplicate dedup*: if the content fingerprint
     (bundle+title+focused value+visible_text+url) matches the previously
@@ -184,6 +186,14 @@ class _CaptureRunner:
     captures. When deduped, the ``pre_capture_hook`` is NOT fired, so the
     session manager's idle timer isn't reset by meaningless repetition.
     """
+
+    # Bounded queue for backpressure. Captures are de-duplicated by the
+    # dispatcher upstream and again by content-fingerprint here, so a
+    # backlog past this size is a sign the worker is stuck or LLM/AX
+    # calls are slow — drop with a warning rather than build an
+    # unbounded thread/memory backlog.
+    _MAX_PENDING = 16
+    _SENTINEL: Any = object()
 
     def __init__(
         self,
@@ -197,6 +207,35 @@ class _CaptureRunner:
         self._pre_capture_hook = pre_capture_hook
         self._lock = threading.Lock()
         self._last_fingerprint: str | None = None
+        self._queue: queue.Queue[Any] = queue.Queue(maxsize=self._MAX_PENDING)
+        self._worker: threading.Thread | None = None
+
+    def start_worker(self) -> None:
+        """Spawn the dedicated worker thread. Idempotent."""
+        if self._worker is not None and self._worker.is_alive():
+            return
+        self._worker = threading.Thread(
+            target=self._worker_loop, name="capture-worker", daemon=True,
+        )
+        self._worker.start()
+
+    def stop_worker(self, *, timeout: float = 5.0) -> None:
+        """Drain the queue and join the worker thread."""
+        if self._worker is None:
+            return
+        with contextlib.suppress(queue.Full):
+            self._queue.put(self._SENTINEL, timeout=1.0)
+        self._worker.join(timeout=timeout)
+        if self._worker.is_alive():
+            logger.warning("capture worker did not exit within %.1fs", timeout)
+        self._worker = None
+
+    def _worker_loop(self) -> None:
+        while True:
+            item = self._queue.get()
+            if item is self._SENTINEL:
+                return
+            self.run(item)
 
     def run(self, trigger: dict[str, Any] | None) -> None:
         # Serialize so two near-simultaneous triggers don't double-capture.
@@ -226,7 +265,15 @@ class _CaptureRunner:
                 logger.error("capture failed: %s", exc, exc_info=True)
 
     def run_threaded(self, trigger: dict[str, Any] | None) -> None:
-        threading.Thread(target=self.run, args=(trigger,), daemon=True).start()
+        """Enqueue a capture for the worker thread; drop with a warning if full."""
+        try:
+            self._queue.put_nowait(trigger)
+        except queue.Full:
+            logger.warning(
+                "capture queue full (%d pending); dropping trigger=%s",
+                self._queue.qsize(),
+                (trigger or {}).get("event_type") if trigger else "heartbeat",
+            )
 
 
 async def run_forever(
@@ -253,6 +300,7 @@ async def run_forever(
         )
 
     runner = _CaptureRunner(cfg, provider, pre_capture_hook=pre_capture_hook)
+    runner.start_worker()
     watcher: AXWatcherProcess | None = None
     dispatcher: EventDispatcher | None = None
 
@@ -303,10 +351,14 @@ async def run_forever(
             # Park until the task is cancelled so the watcher keeps streaming.
             await asyncio.Event().wait()
     finally:
+        # Stop in producer→consumer order so no new work piles up after we've
+        # told the worker to drain: watcher (no new events) → dispatcher
+        # (cancel debounce) → runner worker (drain + join).
         if watcher is not None:
             watcher.stop()
         if dispatcher is not None:
             dispatcher.shutdown()
+        runner.stop_worker()
 
 
 def cleanup_buffer(

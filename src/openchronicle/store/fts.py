@@ -113,6 +113,11 @@ def connect(db_path: Path | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    # Make the auto-checkpoint pages explicit (this is also the SQLite default).
+    # Auto-checkpoint resets the WAL pointer but never shrinks the file —
+    # the daemon calls ``checkpoint()`` from the daily tick so the
+    # ``.db-wal`` and ``.db-shm`` sidecars don't drift unbounded.
+    conn.execute("PRAGMA wal_autocheckpoint=1000")
     conn.executescript(SCHEMA)
     from ..session import store as session_store
     from ..timeline import store as timeline_store
@@ -128,6 +133,25 @@ def cursor(db_path: Path | None = None) -> Iterator[sqlite3.Connection]:
         yield conn
     finally:
         conn.close()
+
+
+def checkpoint(mode: str = "TRUNCATE") -> tuple[int, int, int]:
+    """Run ``PRAGMA wal_checkpoint(<mode>)`` and return (busy, log, checkpointed).
+
+    ``TRUNCATE`` is the form that actually shrinks the ``.db-wal`` sidecar;
+    ``PASSIVE`` (default in auto-checkpoint) only advances the read pointer
+    without touching the file. Best invoked from a periodic tick when the
+    daemon is otherwise quiet so we don't fight active readers.
+    """
+    valid = ("PASSIVE", "FULL", "RESTART", "TRUNCATE")
+    mode = mode.upper()
+    if mode not in valid:
+        raise ValueError(f"invalid checkpoint mode {mode!r}; expected one of {valid}")
+    with cursor() as conn:
+        row = conn.execute(f"PRAGMA wal_checkpoint({mode})").fetchone()
+        if row is None:
+            return (0, 0, 0)
+        return (int(row[0]), int(row[1]), int(row[2]))
 
 
 # ─── files table ───────────────────────────────────────────────────────────

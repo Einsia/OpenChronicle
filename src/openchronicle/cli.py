@@ -85,10 +85,13 @@ def start(
     os.setsid()
     if os.fork() != 0:
         os._exit(0)
-    # Redirect stdio to /dev/null
+    # Redirect stdio to /dev/null. After dup2 the original fd is no longer
+    # needed; closing it avoids leaking one descriptor per daemon start.
     devnull = os.open(os.devnull, os.O_RDWR)
     for fd in (0, 1, 2):
         os.dup2(devnull, fd)
+    if devnull > 2:
+        os.close(devnull)
     daemon.run(cfg, capture_only=capture_only)
     os._exit(0)
 

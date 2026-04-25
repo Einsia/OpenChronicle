@@ -27,7 +27,7 @@ import json
 import re
 import sqlite3
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -63,7 +63,7 @@ class ReduceResult:
     written: bool            # entry landed in event-YYYY-MM-DD.md
     entry_id: str = ""
     path: str = ""
-    sub_tasks: list[str] = None  # type: ignore[assignment]
+    sub_tasks: list[str] = field(default_factory=list)
     summary: str = ""
     # Session window this reduction covered.
     start_time: datetime | None = None
@@ -72,10 +72,6 @@ class ReduceResult:
     # terminal reduction at session end (or the catch-up path). Drives
     # whether the caller should fire the classifier.
     is_final: bool = True
-
-    def __post_init__(self) -> None:
-        if self.sub_tasks is None:
-            self.sub_tasks = []
 
 
 def reduce_session(

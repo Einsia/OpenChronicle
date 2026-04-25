@@ -267,6 +267,17 @@ async def run_daily_safety_net(cfg: Config, manager: SessionManager) -> None:
                 # chance to finish before the catch-up pass would re-process it.
                 await asyncio.sleep(2)
                 await asyncio.to_thread(session_reducer.reduce_all_pending, cfg)
+            # Truncate the WAL sidecar after the heavy daily writes settle —
+            # auto-checkpoint resets the WAL pointer but never shrinks the
+            # file, so without this the sidecar drifts unbounded.
+            try:
+                busy, log_pages, ckpt_pages = await asyncio.to_thread(fts.checkpoint)
+                logger.info(
+                    "daily wal_checkpoint(TRUNCATE): busy=%d log=%d checkpointed=%d",
+                    busy, log_pages, ckpt_pages,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("daily wal_checkpoint failed: %s", exc)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001

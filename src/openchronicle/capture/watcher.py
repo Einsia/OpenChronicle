@@ -10,6 +10,7 @@ adapted to OpenChronicle's bundled-resource layout (mirrors ax_capture.py).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import platform
@@ -102,15 +103,36 @@ class AXWatcherProcess:
         self._reader_thread.start()
         logger.info("AX watcher started: %s", self._watcher_path)
 
-    def stop(self) -> None:
+    def stop(self, *, join_timeout: float = 5.0) -> None:
+        """Stop the subprocess and join the reader thread.
+
+        Closing ``stdout`` is necessary because the reader loop is blocked
+        on a line read; otherwise ``join`` would hang for the full
+        ``join_timeout`` even after the process is dead.
+        """
         self._stop_event.set()
-        if self._process and self._process.poll() is None:
-            self._process.terminate()
+        proc = self._process
+        if proc and proc.poll() is None:
+            proc.terminate()
             try:
-                self._process.wait(timeout=5)
+                proc.wait(timeout=join_timeout)
             except subprocess.TimeoutExpired:
-                self._process.kill()
+                proc.kill()
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    proc.wait(timeout=1.0)
+        if proc and proc.stdout is not None:
+            with contextlib.suppress(OSError, ValueError):
+                proc.stdout.close()
         self._process = None
+
+        reader = self._reader_thread
+        if reader is not None and reader.is_alive():
+            reader.join(timeout=join_timeout)
+            if reader.is_alive():
+                logger.warning(
+                    "AX watcher reader thread did not exit within %.1fs", join_timeout
+                )
+        self._reader_thread = None
         logger.info("AX watcher stopped")
 
     def _run_loop(self) -> None:

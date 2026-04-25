@@ -132,6 +132,13 @@ def status() -> None:
     table.add_row("Root", str(paths.root()))
     table.add_row("Daemon", f"[green]running pid {pid}[/green]" if pid else "[red]stopped[/red]")
     table.add_row("Capture", "[yellow]paused[/yellow]" if paused else "active")
+    excluded = len(cfg.capture.exclude_bundles)
+    table.add_row(
+        "Denylist",
+        f"{excluded} bundle pattern(s)"
+        if excluded
+        else "[yellow]empty (no app filter)[/yellow]",
+    )
 
     buf = paths.capture_buffer_dir()
     if buf.exists():

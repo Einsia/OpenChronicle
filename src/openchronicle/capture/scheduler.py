@@ -270,7 +270,12 @@ async def run_forever(
                 min_capture_gap_seconds=cfg.min_capture_gap_seconds,
                 dedup_interval_seconds=cfg.dedup_interval_seconds,
                 same_window_dedup_seconds=cfg.same_window_dedup_seconds,
+                exclude_bundles=cfg.exclude_bundles,
             )
+            if cfg.exclude_bundles:
+                logger.info(
+                    "capture denylist active: %d pattern(s)", len(cfg.exclude_bundles)
+                )
             watcher.on_event(dispatcher.on_event)
             watcher.start()
             logger.info("event-driven capture started")

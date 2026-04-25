@@ -10,6 +10,27 @@ from typing import Any
 
 from . import paths
 
+# Conservative defaults: password managers, native Apple secure / DM apps,
+# and end-to-end encrypted messengers. Workplace IM (Slack, Teams, Lark)
+# is intentionally NOT included by default — many users rely on capturing
+# work-chat context. Add those to your own list if you want them excluded.
+# Patterns are fnmatch-style (`*` and `?` supported).
+DEFAULT_EXCLUDED_BUNDLES: tuple[str, ...] = (
+    # Password / secrets managers
+    "com.1password.*",
+    "com.agilebits.*",            # 1Password legacy bundle ids
+    "com.bitwarden.*",
+    "com.dashlane.*",
+    "io.proton.pass.*",
+    "com.lastpass.*",
+    # Apple native secure / DM apps
+    "com.apple.MobileSMS",        # Messages
+    "com.apple.mail",
+    "com.apple.keychainaccess",
+    # End-to-end encrypted messengers
+    "org.whispersystems.signal-desktop",
+)
+
 
 @dataclass
 class ModelConfig:
@@ -47,6 +68,14 @@ class CaptureConfig:
     screenshot_jpeg_quality: int = 80
     ax_depth: int = 100
     ax_timeout_seconds: int = 3
+    # Bundle-id patterns (fnmatch syntax) whose AX events are dropped at
+    # the dispatcher entry, before they ever hit the capture buffer or
+    # any LLM call. Defaults cover password managers, native Apple secure
+    # apps, and E2E messengers — see DEFAULT_EXCLUDED_BUNDLES. Set to an
+    # empty list to disable.
+    exclude_bundles: list[str] = field(
+        default_factory=lambda: list(DEFAULT_EXCLUDED_BUNDLES)
+    )
 
 
 @dataclass
@@ -242,6 +271,15 @@ screenshot_max_width = 1920
 screenshot_jpeg_quality = 80
 ax_depth = 100                # Electron apps (Claude Desktop, VS Code, Slack) have deep DOM; 8 only reaches the chrome
 ax_timeout_seconds = 3
+# Bundle-id patterns (fnmatch syntax) whose AX events are dropped before
+# they ever hit the capture buffer. Conservative defaults cover password
+# managers, Apple Messages/Mail/Keychain, and Signal. Workplace IM
+# (Slack/Teams/Lark) is NOT excluded by default — uncomment and edit if
+# you want to scope captures further.
+# exclude_bundles = [
+#   "com.1password.*", "com.bitwarden.*", "com.apple.MobileSMS",
+#   "com.apple.mail", "org.whispersystems.signal-desktop",
+# ]
 
 [timeline]
 window_minutes = 1             # length of each aggregator block (verbatim-preserving normalizer)

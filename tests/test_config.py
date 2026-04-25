@@ -12,6 +12,40 @@ def test_defaults_when_no_file(tmp_path: Path) -> None:
     assert default.model == "gpt-5.4-nano"
 
 
+def test_default_exclude_bundles_present(tmp_path: Path) -> None:
+    """Sensitive-app denylist ships with conservative defaults out of the box."""
+    cfg = config.load(tmp_path / "missing.toml")
+    bundles = cfg.capture.exclude_bundles
+    assert isinstance(bundles, list)
+    assert "com.1password.*" in bundles
+    assert "com.apple.MobileSMS" in bundles
+    assert "org.whispersystems.signal-desktop" in bundles
+
+
+def test_exclude_bundles_user_override(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        """
+[capture]
+exclude_bundles = ["com.example.private"]
+"""
+    )
+    cfg = config.load(path)
+    assert cfg.capture.exclude_bundles == ["com.example.private"]
+
+
+def test_exclude_bundles_empty_disables_filter(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        """
+[capture]
+exclude_bundles = []
+"""
+    )
+    cfg = config.load(path)
+    assert cfg.capture.exclude_bundles == []
+
+
 def test_stage_override_merges(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     path.write_text(

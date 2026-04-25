@@ -22,9 +22,10 @@ Additional guards:
 
 from __future__ import annotations
 
+import fnmatch
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from ..logger import get
@@ -57,12 +58,14 @@ class EventDispatcher:
         min_capture_gap_seconds: float = 2.0,
         dedup_interval_seconds: float = 1.0,
         same_window_dedup_seconds: float = 5.0,
+        exclude_bundles: Iterable[str] | None = None,
     ) -> None:
         self._capture_fn = capture_fn
         self._debounce_seconds = debounce_seconds
         self._min_capture_gap = min_capture_gap_seconds
         self._dedup_interval = dedup_interval_seconds
         self._same_window_dedup = same_window_dedup_seconds
+        self._exclude_bundles: tuple[str, ...] = tuple(exclude_bundles or ())
 
         self._lock = threading.Lock()
         self._debounce_timer: threading.Timer | None = None
@@ -72,6 +75,16 @@ class EventDispatcher:
         self._last_capture_key: str = ""
         self._last_capture_monotonic: float = 0.0
 
+    def _is_excluded_bundle(self, bundle_id: str) -> bool:
+        """Drop events from bundle ids matching any user-configured fnmatch pattern.
+
+        Patterns are matched case-sensitively (macOS bundle ids are conventionally
+        lowercase reverse-DNS, e.g. ``com.1password.1password7``).
+        """
+        if not bundle_id or not self._exclude_bundles:
+            return False
+        return any(fnmatch.fnmatchcase(bundle_id, pat) for pat in self._exclude_bundles)
+
     def on_event(self, raw: dict[str, Any]) -> None:
         """Watcher callback. Classifies the event and (maybe) triggers capture."""
         event_type = raw.get("event_type", "")
@@ -80,6 +93,14 @@ class EventDispatcher:
 
         bundle_id = raw.get("bundle_id", "") or ""
         window_title = raw.get("window_title", "") or ""
+
+        if self._is_excluded_bundle(bundle_id):
+            logger.debug(
+                "capture skipped (denylist): bundle=%s event=%s",
+                bundle_id, event_type,
+            )
+            return
+
         dedup_key = f"{event_type}:{bundle_id}:{window_title}"
 
         now = time.monotonic()

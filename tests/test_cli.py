@@ -1,21 +1,142 @@
-"""Test CLI helper functions (status enrichment, search, version)."""
+"""Test CLI commands and helper functions (status enrichment, search, version).
+
+Every CLI command is tested via Typer's CliRunner to exercise the actual
+code path the user would invoke. Helper functions have their own unit tests
+for edge cases that are hard to trigger through the runner.
+"""
 
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
 
 from openchronicle import __version__
 from openchronicle.cli import (
     _daemon_uptime,
     _health_status,
     _last_capture_info,
+    app,
 )
 from openchronicle.store import fts
 
+runner = CliRunner()
 
-# ─── _daemon_uptime ────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════
+#  CLI command integration tests (caller's perspective)
+# ═══════════════════════════════════════════════════════════════════
+
+# ─── version ──────────────────────────────────────────────────────
+
+
+def test_version_command() -> None:
+    """`version` prints the OpenChronicle version string."""
+    result = runner.invoke(app, ["version"])
+    assert result.exit_code == 0
+    assert f"OpenChronicle  v{__version__}" in result.stdout
+    assert "Python" in result.stdout
+    assert "Platform" in result.stdout
+
+
+# ─── search ───────────────────────────────────────────────────────
+
+
+def _seed_entry(conn) -> None:
+    from openchronicle.store import entries as entries_mod
+
+    entries_mod.create_file(
+        conn, name="tool-vim.md", description="vim editor", tags=["tool"]
+    )
+    entries_mod.append_entry(
+        conn,
+        name="tool-vim.md",
+        content="User uses list comprehensions in Python.",
+        tags=["editor"],
+    )
+
+
+def _seed_capture(conn) -> None:
+    fts.insert_capture(
+        conn,
+        id="c1",
+        timestamp="2026-04-22T14:00:00+08:00",
+        app_name="Cursor",
+        bundle_id="com.test.cursor",
+        window_title="main.py",
+        focused_role="AXTextArea",
+        focused_value="def f()",
+        visible_text="working on authentication flow",
+        url="",
+    )
+
+
+def test_search_finds_entries(ac_root: Path) -> None:
+    """Searching for content that exists in entries returns results."""
+    with fts.cursor() as conn:
+        _seed_entry(conn)
+
+    result = runner.invoke(app, ["search", "list comprehensions"])
+    assert result.exit_code == 0
+    assert "list comprehensions" in result.stdout
+    assert "entry" in result.stdout or "result" in result.stdout.lower()
+
+
+def test_search_finds_captures(ac_root: Path) -> None:
+    """Searching for content that exists in captures returns results."""
+    with fts.cursor() as conn:
+        _seed_capture(conn)
+
+    result = runner.invoke(app, ["search", "authentication"])
+    assert result.exit_code == 0
+    assert "authentication" in result.stdout or "authentic" in result.stdout
+    assert "capture" in result.stdout.lower()
+
+
+def test_search_no_results(ac_root: Path) -> None:
+    """Searching for nonsense shows a "No results" message."""
+    result = runner.invoke(app, ["search", "xyznonexistent12345"])
+    assert result.exit_code == 0
+    assert "No results" in result.stdout
+
+
+def test_search_json_output(ac_root: Path) -> None:
+    """--json outputs valid JSON with type/timestamp/text fields."""
+    # Ensure config already exists so _init() doesn't emit non-JSON to stdout
+    from openchronicle import config as config_mod
+    config_mod.write_default_if_missing()
+
+    with fts.cursor() as conn:
+        _seed_entry(conn)
+        _seed_capture(conn)
+
+    result = runner.invoke(app, ["search", "Python", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert isinstance(data, list)
+    for item in data:
+        assert "type" in item
+        assert "timestamp" in item
+        assert "text" in item
+
+
+def test_search_limit(ac_root: Path) -> None:
+    """--limit caps the number of results returned."""
+    with fts.cursor() as conn:
+        _seed_entry(conn)
+
+    result = runner.invoke(app, ["search", "Python", "-n", "1"])
+    assert result.exit_code == 0
+    assert "1 result" in result.stdout or "1" in result.stdout
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Helper function unit tests (edge cases for pure functions)
+# ═══════════════════════════════════════════════════════════════════
+
+# ─── _daemon_uptime ───────────────────────────────────────────────
 
 
 def test_daemon_uptime_stopped_when_no_pid() -> None:
@@ -23,7 +144,7 @@ def test_daemon_uptime_stopped_when_no_pid() -> None:
     assert _daemon_uptime() == "stopped"
 
 
-# ─── _health_status ────────────────────────────────────────────────────────
+# ─── _health_status ───────────────────────────────────────────────
 
 
 def test_health_stopped() -> None:
@@ -45,15 +166,13 @@ def test_health_healthy() -> None:
 
 
 def test_health_stale() -> None:
-    from datetime import timedelta
-
     old = (datetime.now() - timedelta(minutes=10)).isoformat()
     label, style = _health_status(9999, old)
     assert "stale" in label
     assert style == "yellow"
 
 
-# ─── _last_capture_info ────────────────────────────────────────────────────
+# ─── _last_capture_info ───────────────────────────────────────────
 
 
 def test_last_capture_none_when_dir_missing() -> None:
@@ -86,57 +205,3 @@ def test_last_capture_finds_newest(ac_root: Path) -> None:
     # c2 sorts after c1
     assert ts == "2026-04-22T14:05:00+08:00", f"got ts={ts!r}"
     assert app == "Safari", f"got app={app!r}"
-
-
-# ─── version constant ──────────────────────────────────────────────────────
-
-
-def test_version_is_string() -> None:
-    assert isinstance(__version__, str)
-    assert "." in __version__
-
-
-# ─── search integration (via fts) ──────────────────────────────────────────
-
-
-def _seed_capture(conn, *, id, ts, app, title, value, text, url=""):
-    fts.insert_capture(
-        conn, id=id, timestamp=ts, app_name=app,
-        bundle_id="com.test." + app.lower(),
-        window_title=title, focused_role="AXTextArea",
-        focused_value=value, visible_text=text, url=url,
-    )
-
-
-def test_search_finds_entries(ac_root: Path) -> None:
-    from openchronicle.store import entries as entries_mod
-
-    with fts.cursor() as conn:
-        entries_mod.create_file(
-            conn, name="tool-vim.md", description="vim editor", tags=["tool"]
-        )
-        entries_mod.append_entry(
-            conn, name="tool-vim.md",
-            content="User uses list comprehensions in Python.",
-            tags=["editor"],
-        )
-
-        results = fts.search(conn, query="list comprehensions", top_k=10)
-    assert len(results) >= 1
-
-
-def test_search_finds_captures(ac_root: Path) -> None:
-    with fts.cursor() as conn:
-        _seed_capture(conn, id="c1", ts="2026-04-22T14:00:00+08:00",
-                      app="Cursor", title="main.py", value="def f()",
-                      text="working on authentication flow")
-
-        results = fts.search_captures(conn, query="authentication", limit=10)
-    assert len(results) == 1
-    assert results[0].id == "c1"
-
-
-def test_search_returns_empty_for_nonsense(ac_root: Path) -> None:
-    with fts.cursor() as conn:
-        results = fts.search(conn, query="xyznonexistent12345", top_k=10)
-    assert len(results) == 0

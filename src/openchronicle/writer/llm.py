@@ -4,12 +4,24 @@ from __future__ import annotations
 
 import json
 import os
+import time
+from dataclasses import dataclass
 from typing import Any
 
 from ..config import Config, resolve_api_key
 from ..logger import get
 
 logger = get("openchronicle.writer")
+
+
+@dataclass
+class PingResult:
+    stage: str
+    model: str
+    ok: bool
+    latency_ms: int | None
+    error: str | None
+    mocked: bool = False
 
 
 def call_llm(
@@ -78,6 +90,60 @@ def extract_text(response: Any) -> str:
         return response.choices[0].message.content or ""
     except (AttributeError, IndexError):
         return ""
+
+
+def ping_stage(cfg: Config, stage: str, *, timeout: float = 5.0) -> PingResult:
+    """Send a tiny round-trip request to the stage's configured model.
+
+    Returns a PingResult with success, latency, and a short error label on
+    failure. Honors OPENCHRONICLE_LLM_MOCK=1 by returning a mocked-ok result
+    without touching the network. Never raises — `status` and similar
+    informational callers must remain non-fatal.
+    """
+    model_cfg = cfg.model_for(stage)
+    if os.environ.get("OPENCHRONICLE_LLM_MOCK") == "1":
+        return PingResult(
+            stage=stage, model=model_cfg.model, ok=True,
+            latency_ms=0, error=None, mocked=True,
+        )
+
+    try:
+        import litellm  # lazy import — keeps CLI startup fast
+    except ImportError as exc:
+        return PingResult(
+            stage=stage, model=model_cfg.model, ok=False,
+            latency_ms=None, error=f"ImportError: {exc}",
+        )
+
+    kwargs: dict[str, Any] = {
+        "model": model_cfg.model,
+        "messages": [{"role": "user", "content": "Reply with 'ok'."}],
+        "max_tokens": 4,
+        "timeout": timeout,
+    }
+    if model_cfg.base_url:
+        kwargs["api_base"] = model_cfg.base_url
+    api_key = resolve_api_key(model_cfg)
+    if api_key:
+        kwargs["api_key"] = api_key
+
+    start = time.monotonic()
+    try:
+        litellm.completion(**kwargs)
+    except Exception as exc:  # noqa: BLE001
+        label = type(exc).__name__
+        msg = str(exc).strip().splitlines()[0] if str(exc).strip() else ""
+        if msg:
+            label = f"{label}: {msg[:60]}"
+        return PingResult(
+            stage=stage, model=model_cfg.model, ok=False,
+            latency_ms=None, error=label[:80],
+        )
+    latency_ms = int((time.monotonic() - start) * 1000)
+    return PingResult(
+        stage=stage, model=model_cfg.model, ok=True,
+        latency_ms=latency_ms, error=None,
+    )
 
 
 def extract_tool_calls(response: Any) -> list[dict[str, Any]]:

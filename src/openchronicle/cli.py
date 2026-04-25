@@ -169,11 +169,78 @@ def status() -> None:
         tlb_last = tlb_row[1] if tlb_row and tlb_row[1] else "(none)"
         table.add_row("Timeline", f"{tlb_count} blocks, last end: {tlb_last}")
 
-    for stage in ("timeline", "reducer", "classifier", "compact"):
+    stages = ("timeline", "reducer", "classifier", "compact")
+    ping_results = _ping_stages(cfg, stages)
+    for stage in stages:
         m = cfg.model_for(stage)
-        table.add_row(f"Model ({stage})", m.model)
+        ping = _format_ping(ping_results.get(stage))
+        table.add_row(f"Model ({stage})", f"{m.model}   {ping}")
 
     console.print(table)
+
+
+def _ping_stages(cfg: config_mod.Config, stages: tuple[str, ...]) -> dict:
+    """Probe each stage's configured model, deduping identical configs.
+
+    Returns a dict keyed by stage name -> PingResult. Pings run in parallel
+    so a single hung provider can't stretch the wait past the per-call
+    timeout.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from .writer.llm import ping_stage
+
+    # Dedup by (model, base_url, resolved api key) — common case is one model
+    # for all four stages, which should hit the network once.
+    dedup: dict[tuple[str, str, str], list[str]] = {}
+    for stage in stages:
+        m = cfg.model_for(stage)
+        key = (m.model, m.base_url, config_mod.resolve_api_key(m) or "")
+        dedup.setdefault(key, []).append(stage)
+
+    results: dict = {}
+    if not dedup:
+        return results
+    with ThreadPoolExecutor(max_workers=min(4, len(dedup))) as pool:
+        future_to_stages = {
+            pool.submit(ping_stage, cfg, members[0]): members
+            for members in dedup.values()
+        }
+        for future, members in future_to_stages.items():
+            try:
+                res = future.result(timeout=12.0)
+            except Exception as exc:  # noqa: BLE001
+                res = None
+                err_label = type(exc).__name__
+                from .writer.llm import PingResult
+
+                for stage in members:
+                    m = cfg.model_for(stage)
+                    results[stage] = PingResult(
+                        stage=stage, model=m.model, ok=False,
+                        latency_ms=None, error=err_label,
+                    )
+                continue
+            for stage in members:
+                # Reuse the same PingResult across stages that share a config,
+                # but tag each with its own stage name so callers can map back.
+                from dataclasses import replace
+
+                results[stage] = replace(res, stage=stage)
+    return results
+
+
+def _format_ping(res) -> str:
+    """Render a PingResult as a short Rich-styled cell."""
+    if res is None:
+        return "[dim]?[/dim]"
+    if res.mocked:
+        return "[dim]✓ mocked[/dim]"
+    if res.ok:
+        latency = f"{res.latency_ms} ms" if res.latency_ms is not None else "ok"
+        return f"[green]✓[/green] {latency}"
+    err = res.error or "failed"
+    return f"[red]✗[/red] {err}"
 
 
 @app.command()

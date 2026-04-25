@@ -219,4 +219,16 @@ openchronicle stop && openchronicle start
 openchronicle status
 ```
 
-`status` prints the resolved model for each stage, so a typo in `[models.timeline]` is visible immediately.
+`status` prints the resolved model for each stage **and probes each stage's provider** with a tiny round-trip (`max_tokens=4`, ~5s timeout). Each row shows one of:
+
+- `gpt-5.4-nano   ✓ 234 ms` — provider answered.
+- `claude-haiku-4-5   ✗ AuthenticationError: …` — provider rejected the request. Typos in `model`, missing `api_key_env`, wrong `base_url`, or expired keys all show up here on the first `status` call instead of silently failing inside the writer hours later.
+
+Probes for stages that share an identical `(model, base_url, api_key)` are deduplicated, so the common case (one model for all four stages) makes one network call. Run them in parallel and the whole status command stays under ~5s even if one provider is slow.
+
+To skip the network round-trip — e.g. on a flight, in CI, or just to inspect the resolved config — set the mock env var:
+
+```bash
+OPENCHRONICLE_LLM_MOCK=1 openchronicle status
+# rows show: ✓ mocked
+```

@@ -68,7 +68,8 @@ def _daemon_uptime() -> str:
         return "stopped"
     try:
         mtime = paths.pid_file().stat().st_mtime
-        delta = datetime.now() - datetime.fromtimestamp(mtime)
+        now = datetime.now().astimezone()
+        delta = now - datetime.fromtimestamp(mtime).astimezone()
         h, r = divmod(int(delta.total_seconds()), 3600)
         m = r // 60
         if h > 24:

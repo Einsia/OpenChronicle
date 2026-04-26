@@ -1,0 +1,23 @@
+{
+  "ax_tree": {
+    "apps": [
+      {
+        "name": "Notes",
+        "bundle_id": "com.apple.Notes",
+        "is_frontmost": true,
+        "windows": [
+          {
+            "title": "Notes",
+            "focused": true,
+            "elements": [
+              {
+                "role": "AXTextField",
+                "value": "https://example.com"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

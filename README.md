@@ -33,11 +33,11 @@
   </a>
 </p>
 
-> **Status:** v0.1.0 · macOS only · early alpha
+> **Status:** v0.1.0 · macOS + Windows 11 · early alpha
 
 OpenChronicle gives AI agents a local, inspectable memory built from real screen and app context.
 
-It runs on your Mac, captures structured context from what you're doing, and turns it into persistent Markdown memory: what you're working on, what you've decided, which tools you use, and which people or projects matter.
+It runs on your Mac or Windows PC, captures structured context from what you're doing, and turns it into persistent Markdown memory: what you're working on, what you've decided, which tools you use, and which people or projects matter.
 
 Any agent that can call tools can use it. MCP clients work especially well today, but OpenChronicle is meant to be a general memory layer for tool-using agents - not something tied to one protocol, one model provider, or one app.
 
@@ -120,7 +120,7 @@ The core idea is simple:
 
 ## What you get
 
-* **Event-driven capture** from macOS AX events
+* **Cross-platform capture** from macOS AX events or Windows UI Automation polling
 * **Session-aware memory writing** instead of noisy per-snapshot logs
 * **Human-readable Markdown memory**
 * **Local SQLite indexing**
@@ -133,12 +133,20 @@ The core idea is simple:
 
 ## Install
 
-Requires **macOS 13+** and **Xcode Command Line Tools** (`xcode-select --install`).
+Requires either **macOS 13+** with Xcode Command Line Tools (`xcode-select --install`) or **Windows 11**.
 
+macOS:
 ```bash
 git clone https://github.com/Einsia/OpenChronicle.git
 cd openchronicle
 bash install.sh
+```
+
+Windows PowerShell:
+```powershell
+git clone https://github.com/Einsia/OpenChronicle.git
+cd OpenChronicle
+.\install.ps1
 ```
 
 ---

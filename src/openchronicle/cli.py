@@ -5,9 +5,12 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import platform
 import shutil
 import signal
 import subprocess
+import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -39,6 +42,10 @@ def _init() -> config_mod.Config:
 
 
 def _is_pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if platform.system() == "Windows":
+        return _is_pid_alive_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -48,9 +55,28 @@ def _is_pid_alive(pid: int) -> bool:
     return True
 
 
+def _is_pid_alive_windows(pid: int) -> bool:
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32
+    process_query_limited_information = 0x1000
+    still_active = 259
+    handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+    if not handle:
+        error_access_denied = 5
+        return kernel32.GetLastError() == error_access_denied
+    try:
+        exit_code = ctypes.c_ulong()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return False
+        return exit_code.value == still_active
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def _read_pid() -> int | None:
     try:
-        pid = int(paths.pid_file().read_text().strip())
+        pid = int(paths.pid_file().read_text(encoding="utf-8").strip())
     except (FileNotFoundError, ValueError):
         return None
     return pid if _is_pid_alive(pid) else None
@@ -121,28 +147,39 @@ def _health_status(pid: int | None, last_ts: str | None) -> tuple[str, str]:
     return "stale (no captures in >5m)", "yellow"
 
 
-# ─── commands ─────────────────────────────────────────────────────────────
+def _wait_for_pid(timeout: float = 5.0) -> int | None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        pid = _read_pid()
+        if pid:
+            return pid
+        time.sleep(0.1)
+    return _read_pid()
 
-@app.command()
-def start(
-    foreground: bool = typer.Option(False, "--foreground", "-f", help="Run in this terminal."),
-    capture_only: bool = typer.Option(False, "--capture-only", help="Skip the writer loop."),
-) -> None:
-    """Start the OpenChronicle daemon."""
-    cfg = _init()
-    pid = _read_pid()
-    if pid:
-        console.print(f"[yellow]Already running (pid {pid})[/yellow]")
-        raise typer.Exit(1)
 
+def _start_background_windows(*, capture_only: bool) -> int | None:
+    cmd = [sys.executable, "-m", "openchronicle.cli", "start", "--foreground"]
+    if capture_only:
+        cmd.append("--capture-only")
+
+    creationflags = 0
+    for name in ("CREATE_NEW_PROCESS_GROUP", "DETACHED_PROCESS", "CREATE_NO_WINDOW"):
+        creationflags |= getattr(subprocess, name, 0)
+
+    subprocess.Popen(  # noqa: S603
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        creationflags=creationflags,
+    )
+    return _wait_for_pid()
+
+
+def _start_background_posix(cfg: config_mod.Config, *, capture_only: bool) -> None:
     from . import daemon
 
-    if foreground:
-        console.print("[bold]OpenChronicle starting in foreground[/bold] — Ctrl+C to stop.")
-        daemon.run(cfg, capture_only=capture_only)
-        return
-
-    # Background: double-fork
     if os.fork() != 0:
         console.print("[green]OpenChronicle started in background.[/green]")
         console.print(f"Logs: {paths.logs_dir()}")
@@ -161,6 +198,45 @@ def start(
     os._exit(0)
 
 
+def _remove_stale_pid() -> None:
+    with contextlib.suppress(FileNotFoundError):
+        paths.pid_file().unlink()
+
+
+# ─── commands ─────────────────────────────────────────────────────────────
+
+@app.command()
+def start(
+    foreground: bool = typer.Option(False, "--foreground", "-f", help="Run in this terminal."),
+    capture_only: bool = typer.Option(False, "--capture-only", help="Skip the writer loop."),
+) -> None:
+    """Start the OpenChronicle daemon."""
+    cfg = _init()
+    pid = _read_pid()
+    if pid:
+        console.print(f"[yellow]Already running (pid {pid})[/yellow]")
+        raise typer.Exit(1)
+    if paths.pid_file().exists():
+        _remove_stale_pid()
+
+    from . import daemon
+
+    if foreground:
+        console.print("[bold]OpenChronicle starting in foreground[/bold] — Ctrl+C to stop.")
+        daemon.run(cfg, capture_only=capture_only)
+        return
+
+    if platform.system() == "Windows":
+        started_pid = _start_background_windows(capture_only=capture_only)
+        console.print("[green]OpenChronicle started in background.[/green]")
+        console.print(f"Logs: {paths.logs_dir()}")
+        if started_pid:
+            console.print(f"PID: {started_pid}")
+        return
+
+    _start_background_posix(cfg, capture_only=capture_only)
+
+
 @app.command()
 def stop() -> None:
     """Stop the daemon."""
@@ -171,13 +247,19 @@ def stop() -> None:
         raise typer.Exit(1)
     os.kill(pid, signal.SIGTERM)
     console.print(f"[green]Sent SIGTERM to pid {pid}.[/green]")
+    if platform.system() == "Windows":
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and _is_pid_alive(pid):
+            time.sleep(0.1)
+        if not _is_pid_alive(pid):
+            _remove_stale_pid()
 
 
 @app.command()
 def pause() -> None:
     """Pause capture (daemon stays up but skips captures)."""
     paths.ensure_dirs()
-    paths.paused_flag().write_text(datetime.now().isoformat())
+    paths.paused_flag().write_text(datetime.now().isoformat(), encoding="utf-8")
     console.print("[yellow]Capture paused.[/yellow]")
 
 
@@ -419,7 +501,7 @@ def _load_claude_desktop_config(path: Path) -> dict:
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         console.print(
             f"[red]Could not parse {path}:[/red] {exc}\n"
@@ -479,7 +561,7 @@ def install_claude_desktop(
         "args": ["mcp"],
     }
 
-    cfg_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    cfg_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     verb = "Updated" if replaced else "Registered"
     console.print(f"[green]{verb} {name!r} in Claude Desktop config.[/green]")
@@ -553,7 +635,7 @@ def _load_opencode_config(path: Path) -> dict:
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         console.print(
             f"[red]Could not parse {path}:[/red] {exc}\n"
@@ -622,7 +704,7 @@ def install_opencode(
         "enabled": True,
     }
 
-    cfg_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    cfg_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     verb = "Updated" if replaced else "Registered"
     console.print(f"[green]{verb} {name!r} in opencode config.[/green]")
@@ -676,7 +758,7 @@ def install_mcp_json(
         summary = f"stdio → {openchronicle_bin} mcp"
 
     payload = {"mcpServers": {name: entry}}
-    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     console.print(f"[green]Wrote {out_path}[/green]")
     console.print(f"  server: {name} ({summary})")
@@ -781,7 +863,7 @@ def uninstall_opencode(
         return
 
     del servers[name]
-    cfg_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    cfg_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     console.print(f"[green]Removed {name!r} from opencode config.[/green]")
 
@@ -809,7 +891,7 @@ def uninstall_claude_desktop(
         return
 
     del servers[name]
-    cfg_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    cfg_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     console.print(f"[green]Removed {name!r} from Claude Desktop config.[/green]")
     _restart_reminder("finalize the removal")
@@ -929,7 +1011,7 @@ def rebuild_captures_index() -> None:
     with fts.cursor() as conn:
         for p in files:
             try:
-                data = json.loads(p.read_text())
+                data = json.loads(p.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
                 skipped += 1
                 console.print(f"[yellow]skip {p.name}: {exc}[/yellow]")
@@ -968,7 +1050,7 @@ def config() -> None:
     _init()
     p = paths.config_file()
     console.print(f"[bold]{p}[/bold]")
-    console.print(p.read_text())
+    console.print(p.read_text(encoding="utf-8"))
 
 
 clean_app = typer.Typer(help="Delete past data. Destructive — use with care.")

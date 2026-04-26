@@ -14,6 +14,7 @@ these fields.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -27,6 +28,11 @@ _BROWSER_BUNDLES = {
     "company.thebrowser.Browser",
     "com.brave.Browser",
     "com.operasoftware.Opera",
+    "chrome.exe",
+    "msedge.exe",
+    "firefox.exe",
+    "brave.exe",
+    "opera.exe",
 }
 
 _URL_RE = re.compile(r"https?://\S+")
@@ -89,23 +95,30 @@ def _extract_focused_element(app_data: dict[str, Any]) -> FocusedElement:
     for window in app_data.get("windows", []):
         if not window.get("focused"):
             continue
-        for el in window.get("elements", []):
-            role = el.get("role", "") or ""
-            if role in _EDITABLE_ROLES:
-                return FocusedElement(
-                    role=role,
-                    title=(el.get("title") or "")[:_FOCUS_TITLE_MAX],
-                    value=(el.get("value") or "")[:_FOCUS_VALUE_MAX],
-                    is_editable=True,
-                )
-            if role in _STATIC_ROLES:
-                return FocusedElement(
-                    role=role,
-                    title=(el.get("title") or "")[:_FOCUS_TITLE_MAX],
-                    value=(el.get("value") or el.get("title") or "")[:_FOCUS_VALUE_MAX],
-                    is_editable=False,
-                )
+
+        elements = list(_walk_elements(window.get("elements", [])))
+        for el in elements:
+            if el.get("focused") and (el.get("role") or "") in (_EDITABLE_ROLES | _STATIC_ROLES):
+                return _focused_from_element(el)
+        for el in elements:
+            if (el.get("role") or "") in _EDITABLE_ROLES:
+                return _focused_from_element(el)
+        for el in elements:
+            if (el.get("role") or "") in _STATIC_ROLES:
+                return _focused_from_element(el)
     return FocusedElement()
+
+
+def _focused_from_element(el: dict[str, Any]) -> FocusedElement:
+    role = el.get("role", "") or ""
+    is_editable = role in _EDITABLE_ROLES
+    value = el.get("value") or ("" if is_editable else el.get("title") or "")
+    return FocusedElement(
+        role=role,
+        title=(el.get("title") or "")[:_FOCUS_TITLE_MAX],
+        value=(value or "")[:_FOCUS_VALUE_MAX],
+        is_editable=is_editable,
+    )
 
 
 def _render_visible_text(app_data: dict[str, Any]) -> str:
@@ -116,18 +129,36 @@ def _render_visible_text(app_data: dict[str, Any]) -> str:
 
 
 def _extract_url(app_data: dict[str, Any]) -> str | None:
-    bundle = app_data.get("bundle_id", "")
-    if bundle not in _BROWSER_BUNDLES:
+    bundle = (app_data.get("bundle_id", "") or "").lower()
+    if bundle not in {b.lower() for b in _BROWSER_BUNDLES}:
         return None
     for window in app_data.get("windows", []):
-        for el in window.get("elements", []):
-            if el.get("role") != "AXTextField":
+        for el in _walk_elements(window.get("elements", [])):
+            if el.get("role") not in ("AXTextField", "AXComboBox", "AXWebArea"):
                 continue
             value = (el.get("value") or "").strip()
             if not value:
                 continue
-            if _URL_RE.search(value):
-                return value
-            if "." in value and " " not in value:
+            match = _URL_RE.search(value)
+            if match:
+                return match.group(0).rstrip(".,);]")
+            if _looks_like_bare_url(value):
                 return f"https://{value}"
     return None
+
+
+def _walk_elements(elements: list[dict[str, Any]]) -> Iterable[dict[str, Any]]:
+    for el in elements:
+        yield el
+        children = el.get("children") or []
+        if isinstance(children, list):
+            yield from _walk_elements(children)
+
+
+def _looks_like_bare_url(value: str) -> bool:
+    if any(ch.isspace() for ch in value):
+        return False
+    if "." not in value or len(value) > 300:
+        return False
+    lowered = value.lower()
+    return not lowered.startswith(("about:", "file:", "edge:", "chrome:"))

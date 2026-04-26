@@ -45,7 +45,7 @@ def compact_file(cfg: Config, conn: sqlite3.Connection, *, name: str) -> Compact
     if not path.exists():
         return CompactResult(name, False, 0, 0, 0, 0, 0.0, "file missing")
 
-    original = path.read_text()
+    original = path.read_text(encoding="utf-8")
     before_unique = _unique_tokens(original)
     before_tokens = len(original) // 4
 

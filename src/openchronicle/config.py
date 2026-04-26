@@ -23,8 +23,9 @@ class ModelConfig:
 @dataclass
 class CaptureConfig:
     # Event-driven capture knobs
-    event_driven: bool = True  # consume mac-ax-watcher events
+    event_driven: bool = True  # macOS AX watcher or Windows UIA poller
     heartbeat_minutes: int = 10  # periodic capture even without events
+    poll_interval_seconds: float = 5.0  # Windows UIA polling interval
     debounce_seconds: float = 3.0  # for AXValueChanged bursts
     min_capture_gap_seconds: float = 2.0  # between consecutive captures
     dedup_interval_seconds: float = 1.0  # per-event-type dedup window
@@ -228,8 +229,9 @@ api_key_env = "OPENAI_API_KEY"
 # Accuracy-sensitive — pick a capable model.
 
 [capture]
-event_driven = true           # capture on window/app/typing events via mac-ax-watcher
+event_driven = true           # macOS AX watcher or Windows UIA poller
 heartbeat_minutes = 10        # periodic capture even when nothing happens
+poll_interval_seconds = 5.0   # Windows UI Automation polling interval
 debounce_seconds = 3.0        # for AXValueChanged bursts
 min_capture_gap_seconds = 2.0 # minimum gap between consecutive captures
 dedup_interval_seconds = 1.0  # per-event-type dedup window
@@ -289,5 +291,5 @@ def write_default_if_missing(path: Path | None = None) -> bool:
     if path.exists():
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(DEFAULT_CONFIG_TEMPLATE)
+    path.write_text(DEFAULT_CONFIG_TEMPLATE, encoding="utf-8")
     return True

@@ -105,6 +105,11 @@ def _format_response(
         },
         "visible_text": data.get("visible_text") or "",
         "screenshot_stripped": bool(data.get("screenshot_stripped")),
+        # App-specific S1 fields (populated for known editor / terminal apps).
+        "editor_file": data.get("editor_file"),
+        "editor_project": data.get("editor_project"),
+        "editor_git_branch": data.get("editor_git_branch"),
+        "terminal_cwd": data.get("terminal_cwd"),
     }
     if include_screenshot and shot.get("image_base64"):
         out["screenshot_b64"] = shot["image_base64"]

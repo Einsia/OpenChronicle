@@ -82,7 +82,31 @@ def captures_in_window(start: datetime, end: datetime) -> list[Path]:
     return files
 
 
-def _format_events(capture_files: list[Path]) -> tuple[str, list[str]]:
+def _load_captures(capture_files: list[Path]) -> list[tuple[Path, dict]]:
+    """Parse every capture JSON once. Files that fail to read/parse are dropped.
+
+    The window is small (≤30 files) so the entire parsed list stays cheap to
+    pass around; the win is avoiding a second ``json.loads`` per file when
+    ``_heuristic_entries`` runs after the LLM returns no usable output.
+    """
+    parsed: list[tuple[Path, dict]] = []
+    for p in capture_files:
+        # read_bytes() + json.loads handles BOM/encoding sniffing; read_text()
+        # would raise UnicodeDecodeError (a ValueError, not OSError) on a
+        # mis-encoded file and crash the aggregator instead of dropping it.
+        try:
+            data = json.loads(p.read_bytes())
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("timeline: failed to load capture %s: %s", p.name, exc)
+            continue
+        if not isinstance(data, dict):
+            logger.warning("timeline: capture %s is not a JSON object", p.name)
+            continue
+        parsed.append((p, data))
+    return parsed
+
+
+def _format_events(parsed: list[tuple[Path, dict]]) -> tuple[str, list[str]]:
     """Render captures for the timeline prompt. Returns (events_text, apps_used).
 
     Reads the structured S1 fields written by ``capture/s1_parser.py`` —
@@ -94,12 +118,8 @@ def _format_events(capture_files: list[Path]) -> tuple[str, list[str]]:
     lines: list[str] = []
     apps: set[str] = set()
 
-    files = capture_files[-_MAX_EVENTS_PER_WINDOW:]
-    for i, p in enumerate(files, 1):
-        try:
-            data = json.loads(p.read_text())
-        except (OSError, json.JSONDecodeError):
-            continue
+    files = parsed[-_MAX_EVENTS_PER_WINDOW:]
+    for i, (p, data) in enumerate(files, 1):
         ts_raw = str(data.get("timestamp", p.stem))
         ts = _short_time(ts_raw)
 
@@ -196,11 +216,18 @@ def produce_block_for_window(
         )
         return None
 
-    events_text, apps_used = _format_events(capture_files)
+    # Parse capture JSON once; reused for prompt rendering AND the heuristic
+    # fallback so an LLM miss doesn't trigger a second pass over the same files.
+    parsed = _load_captures(capture_files)
+    events_text, apps_used = _format_events(parsed)
+    # Use len(parsed) — capture_count must match what the LLM actually sees
+    # and what _heuristic_entries can group; len(capture_files) overcounts
+    # whenever _load_captures drops a corrupt or non-dict file.
+    capture_count = len(parsed)
     prompt = load_prompt("timeline_block.md").format(
         start_time=_format_window(start),
         end_time=_format_window(end),
-        capture_count=len(capture_files),
+        capture_count=capture_count,
         events_text=events_text,
     )
 
@@ -223,7 +250,7 @@ def produce_block_for_window(
         logger.warning("timeline: LLM call failed: %s", exc)
 
     if not entries:
-        entries = _heuristic_entries(capture_files)
+        entries = _heuristic_entries(parsed)
 
     block = store.TimelineBlock(
         start_time=start,
@@ -231,25 +258,21 @@ def produce_block_for_window(
         timezone=start.tzname() or "",
         entries=entries,
         apps_used=apps_used,
-        capture_count=len(capture_files),
+        capture_count=capture_count,
     )
     store.insert(conn, block)
     logger.info(
         "timeline: stored block %s — %s → %s (%d entries, %d captures, apps=%s)",
         block.id, start.isoformat(), end.isoformat(),
-        len(entries), len(capture_files), ", ".join(apps_used),
+        len(entries), capture_count, ", ".join(apps_used),
     )
     return block
 
 
-def _heuristic_entries(capture_files: list[Path]) -> list[str]:
+def _heuristic_entries(parsed: list[tuple[Path, dict]]) -> list[str]:
     """Cheap fallback when the LLM returns no parseable entries."""
     groups: list[tuple[str, str, int]] = []
-    for p in capture_files:
-        try:
-            data = json.loads(p.read_text())
-        except (OSError, json.JSONDecodeError):
-            continue
+    for _p, data in parsed:
         wm = data.get("window_meta") or {}
         app = str(wm.get("app_name") or "Unknown")
         title = str(wm.get("title") or "")

@@ -1,19 +1,13 @@
 import os
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from openchronicle.store import (
-    entries as entries_mod,
-)
-from openchronicle.store import (
-    files as files_mod,
-)
-from openchronicle.store import (
-    fts,
-    index_md,
-)
+from openchronicle.store import entries as entries_mod
+from openchronicle.store import files as files_mod
+from openchronicle.store import fts, index_md
 
 
 def test_make_id_uniqueness() -> None:
@@ -186,3 +180,121 @@ def test_atomic_write_round_trip_through_append_entry(ac_root: Path) -> None:
     parsed = files_mod.read_file(files_mod.memory_path("topic-rust-async.md"))
     assert len(parsed.entries) == 1
     assert "Tokio" in parsed.entries[0].body
+
+
+def test_concurrent_appends_lose_no_entries(ac_root: Path) -> None:
+    """N threads appending to the same file must all land.
+
+    Without the per-path lock, ``append_entry`` is read-modify-write:
+    each thread reads the same base, appends, and only the last writer's
+    version reaches disk — silent data loss with FTS rows pointing at
+    entries that don't exist on disk. ``threading.Barrier`` forces every
+    thread to enter the critical section as simultaneously as the OS
+    will allow, which is what makes the race deterministic enough to
+    catch in a unit test.
+    """
+    n = 30
+    name = "topic-load-test.md"
+
+    with fts.cursor() as conn:
+        entries_mod.create_file(
+            conn, name=name, description="concurrent appends", tags=["topic"]
+        )
+
+    barrier = threading.Barrier(n)
+    errors: list[BaseException] = []
+
+    def worker(i: int) -> None:
+        try:
+            barrier.wait()
+            with fts.cursor() as conn:
+                entries_mod.append_entry(
+                    conn, name=name,
+                    content=f"entry number {i:02d}",
+                    tags=["topic"],
+                )
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30.0)
+
+    assert errors == [], f"workers errored: {errors}"
+
+    parsed = files_mod.read_file(files_mod.memory_path(name))
+    assert len(parsed.entries) == n, (
+        f"expected {n} entries, got {len(parsed.entries)} "
+        f"— silent loss indicates the lock is not protecting the read-modify-write"
+    )
+    bodies = {e.body for e in parsed.entries}
+    assert len(bodies) == n, "duplicate or missing entry bodies"
+    # File and FTS must agree.
+    with fts.cursor() as conn:
+        rebuilt_files, rebuilt_entries = entries_mod.rebuild_index(conn)
+        assert rebuilt_files == 1
+        assert rebuilt_entries == n
+
+
+def test_concurrent_supersede_then_append_serializes(ac_root: Path) -> None:
+    """A supersede + an append on the same file must both land cleanly.
+
+    Without the per-path lock, supersede's two-write read-modify-write
+    can interleave with an append in a way that produces a file the
+    next ``read_file`` won't even parse. With the lock, both operations
+    serialize and the resulting file has 1 superseded original + 1
+    superseder + 1 fresh append, all parseable.
+    """
+    name = "person-bob.md"
+    with fts.cursor() as conn:
+        entries_mod.create_file(conn, name=name, description="Bob", tags=["person"])
+        original = entries_mod.append_entry(
+            conn, name=name, content="Bob is at OpenAI as ML lead.", tags=["person"],
+        )
+
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    def supersede_worker() -> None:
+        try:
+            barrier.wait()
+            with fts.cursor() as conn:
+                entries_mod.supersede_entry(
+                    conn, name=name, old_entry_id=original,
+                    new_content="Bob moved from OpenAI to Anthropic in 2026-04.",
+                    reason="role change", tags=["person"],
+                )
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    def append_worker() -> None:
+        try:
+            barrier.wait()
+            with fts.cursor() as conn:
+                entries_mod.append_entry(
+                    conn, name=name,
+                    content="Bob's preferred IDE is Cursor.",
+                    tags=["person", "preference"],
+                )
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=supersede_worker),
+        threading.Thread(target=append_worker),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=20.0)
+
+    assert errors == [], f"workers errored: {errors}"
+
+    parsed = files_mod.read_file(files_mod.memory_path(name))
+    # 1 superseded original + 1 superseder + 1 fresh append = 3 entries.
+    assert len(parsed.entries) == 3, (
+        f"expected 3 entries, got {len(parsed.entries)} — interleaved writes "
+        f"likely lost or corrupted one"
+    )

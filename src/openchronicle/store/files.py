@@ -6,6 +6,8 @@ import contextlib
 import os
 import re
 import tempfile
+import threading
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -66,6 +68,41 @@ def atomic_write_text(path: Path, content: str) -> None:
         raise
 
 VALID_PREFIXES = ("user-", "project-", "tool-", "topic-", "person-", "org-", "event-")
+
+
+# Per-path mutex registry. The reducer fires from a daemon thread per
+# session, and the daily-tick + on-demand classifiers can fire in
+# parallel, so two threads can both call ``append_entry`` (or supersede)
+# on the same memory file. Without serialization the read-modify-write
+# in those functions silently loses one of the writes — both threads
+# read the same base, both write a "+1 entry" version, and the second
+# write wins. The FTS index, written outside the file, ends up holding
+# rows for entries that don't exist on disk.
+#
+# The fix is in-process (the daemon is single-process; CLI commands
+# don't write memory files), per-path (so unrelated files don't
+# serialize), and bounded (one Lock per memory file ≈ a few hundred
+# entries lifetime, dozens of bytes each).
+_lock_registry_lock = threading.Lock()
+_path_locks: dict[str, threading.Lock] = {}
+
+
+def _lock_for(path: Path) -> threading.Lock:
+    """Return the threading.Lock that guards write access to ``path``."""
+    key = str(path)
+    with _lock_registry_lock:
+        lock = _path_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _path_locks[key] = lock
+        return lock
+
+
+@contextlib.contextmanager
+def file_lock(path: Path) -> Iterator[None]:
+    """Serialize concurrent writers on a single memory-file path."""
+    with _lock_for(path):
+        yield
 
 ENTRY_HEADING_RE = re.compile(
     r"^##\s*\[(?P<ts>[^\]]+)\]\s*\{id:\s*(?P<id>[a-zA-Z0-9\-]+)\}(?P<tags>[^\n]*)$",
@@ -207,9 +244,10 @@ def render_file(
 
 
 def update_frontmatter(path: Path, updates: dict[str, Any]) -> None:
-    post = frontmatter.load(path)
-    post.metadata.update(updates)
-    atomic_write_text(path, frontmatter.dumps(post) + "\n")
+    with file_lock(path):
+        post = frontmatter.load(path)
+        post.metadata.update(updates)
+        atomic_write_text(path, frontmatter.dumps(post) + "\n")
 
 
 def list_memory_files() -> list[Path]:

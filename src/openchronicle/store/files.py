@@ -88,8 +88,14 @@ _path_locks: dict[str, threading.Lock] = {}
 
 
 def _lock_for(path: Path) -> threading.Lock:
-    """Return the threading.Lock that guards write access to ``path``."""
-    key = str(path)
+    """Return the threading.Lock that guards write access to ``path``.
+
+    Resolves the path before keying so a relative and an absolute spelling
+    of the same file map to the same lock. ``resolve(strict=False)`` works
+    on non-existent paths (the file may not be created yet) and is called
+    outside the registry lock so a slow stat doesn't stall other threads.
+    """
+    key = str(path.resolve())
     with _lock_registry_lock:
         lock = _path_locks.get(key)
         if lock is None:

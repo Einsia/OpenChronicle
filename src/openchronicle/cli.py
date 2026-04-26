@@ -190,8 +190,9 @@ def _ping_stages(cfg: config_mod.Config, stages: tuple[str, ...]) -> dict:
     timeout.
     """
     from concurrent.futures import ThreadPoolExecutor
+    from dataclasses import replace
 
-    from .writer.llm import ping_stage
+    from .writer.llm import PingResult, ping_stage
 
     # Dedup by (model, base_url, resolved api key) — common case is one model
     # for all four stages, which should hit the network once.
@@ -213,10 +214,7 @@ def _ping_stages(cfg: config_mod.Config, stages: tuple[str, ...]) -> dict:
             try:
                 res = future.result(timeout=12.0)
             except Exception as exc:  # noqa: BLE001
-                res = None
                 err_label = type(exc).__name__
-                from .writer.llm import PingResult
-
                 for stage in members:
                     m = cfg.model_for(stage)
                     results[stage] = PingResult(
@@ -227,8 +225,6 @@ def _ping_stages(cfg: config_mod.Config, stages: tuple[str, ...]) -> dict:
             for stage in members:
                 # Reuse the same PingResult across stages that share a config,
                 # but tag each with its own stage name so callers can map back.
-                from dataclasses import replace
-
                 results[stage] = replace(res, stage=stage)
     return results
 

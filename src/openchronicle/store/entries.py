@@ -104,7 +104,7 @@ def append_entry(
             logger.info("flagged %s for compact (est %d tokens > %d)",
                         path.name, est_tokens, soft_limit_tokens)
 
-    path.write_text(frontmatter.dumps(post) + "\n")
+    files_mod.atomic_write_text(path, frontmatter.dumps(post) + "\n")
 
     # Update FTS
     fts.insert_entry(
@@ -179,13 +179,13 @@ def supersede_entry(
     if not text.endswith("\n"):
         text += "\n"
     text += new_block
-    path.write_text(text)
+    files_mod.atomic_write_text(path, text)
 
     # Rebuild frontmatter counts (re-parse to be safe)
     post = frontmatter.load(path)
     post.metadata["entry_count"] = int(post.metadata.get("entry_count", 0)) + 1
     post.metadata["updated"] = files_mod.today()
-    path.write_text(frontmatter.dumps(post) + "\n")
+    files_mod.atomic_write_text(path, frontmatter.dumps(post) + "\n")
 
     # FTS
     fts.mark_superseded(conn, old_entry_id)

@@ -6,6 +6,7 @@ import sqlite3
 from datetime import date, datetime, timedelta
 
 from .. import paths
+from . import files as files_mod
 from . import fts
 
 
@@ -76,8 +77,7 @@ def rebuild(conn: sqlite3.Connection) -> None:
         lines.append("_(none)_")
     lines.append("")
 
-    paths.memory_dir().mkdir(parents=True, exist_ok=True)
-    (paths.memory_dir() / "index.md").write_text("\n".join(lines))
+    files_mod.atomic_write_text(paths.memory_dir() / "index.md", "\n".join(lines))
 
 
 def auto_dormant(conn: sqlite3.Connection, *, days: int = 30) -> int:

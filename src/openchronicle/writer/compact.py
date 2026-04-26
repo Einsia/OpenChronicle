@@ -93,7 +93,9 @@ def compact_file(cfg: Config, conn: sqlite3.Connection, *, name: str) -> Compact
         )
 
     # Accept: write back, clear flag, update FTS by doing per-file rebuild
-    path.write_text(new_text if new_text.endswith("\n") else new_text + "\n")
+    files_mod.atomic_write_text(
+        path, new_text if new_text.endswith("\n") else new_text + "\n"
+    )
 
     # Re-ingest this file's entries into FTS
     fts.delete_entries_for(conn, path.name)

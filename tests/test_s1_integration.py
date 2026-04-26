@@ -94,7 +94,7 @@ def test_scheduler_enrich_pipeline_writes_s1_fields(
     assert path is not None
     assert path.exists()
 
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_bytes())
 
     # S1 baseline fields are present.
     assert data.get("url") == "https://www.anthropic.com/news"
@@ -176,7 +176,7 @@ def test_scheduler_non_browser_no_url_in_index(ac_root: Path, monkeypatch) -> No
     path = sched_mod.capture_once(cfg, CursorProvider())
 
     assert path is not None
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_bytes())
     assert data.get("url") is None
 
 

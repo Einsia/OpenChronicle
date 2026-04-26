@@ -19,7 +19,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures" / "s1"
 
 
 def _read_json(path: Path) -> dict:
-    return json.loads(path.read_text())
+    return json.loads(path.read_bytes())
 
 
 def _fixture_ids() -> list[str]:

@@ -179,10 +179,14 @@ def supersede_entry(
     if not text.endswith("\n"):
         text += "\n"
     text += new_block
-    files_mod.atomic_write_text(path, text)
 
-    # Rebuild frontmatter counts (re-parse to be safe)
-    post = frontmatter.load(path)
+    # Fold the metadata bump (entry_count, updated) into a SINGLE write.
+    # The earlier two-write shape — write the new text, reload from
+    # disk, write again with bumped metadata — left a window in which
+    # a crash between writes would persist the new content with stale
+    # frontmatter. ``frontmatter.loads`` re-parses the in-memory text
+    # we just built, so the second-write reload is unnecessary.
+    post = frontmatter.loads(text)
     post.metadata["entry_count"] = int(post.metadata.get("entry_count", 0)) + 1
     post.metadata["updated"] = files_mod.today()
     files_mod.atomic_write_text(path, frontmatter.dumps(post) + "\n")

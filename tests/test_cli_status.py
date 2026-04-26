@@ -81,3 +81,140 @@ def test_status_renders_probe_failure(ac_root: Path, monkeypatch: pytest.MonkeyP
     assert result.exit_code == 0, result.output
     assert "AuthenticationError" in result.output
     assert "✗" in result.output
+
+# ═══════════════════════════════════════════════════════════════════
+#  Status helper unit tests
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_daemon_uptime_stopped_when_no_pid(ac_root: Path) -> None:
+    """Returns "stopped" when the daemon is not running."""
+    assert cli._daemon_uptime() == "stopped"
+
+
+def test_daemon_uptime_running(ac_root: Path) -> None:
+    """Returns a human-readable uptime when PID file exists."""
+    pid_file = __import__("openchronicle.paths", fromlist=["paths"]).pid_file()
+    pid_file.write_text("99999")  # non-existent but alive enough for _read_pid
+
+    def fake_read_pid():
+        return 99999
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(cli, "_read_pid", fake_read_pid)
+    try:
+        uptime = cli._daemon_uptime()
+        assert uptime != "stopped"
+        assert "m" in uptime  # recently started, should be in minutes
+    finally:
+        monkeypatch.undo()
+
+
+def test_health_stopped() -> None:
+    """(None, None) → "stopped", "red"."""
+    label, style = cli._health_status(None, None)
+    assert label == "stopped"
+    assert style == "red"
+
+
+def test_health_running_no_captures() -> None:
+    """PID exists but no last timestamp → "running (no captures yet)", "yellow"."""
+    label, style = cli._health_status(9999, None)
+    assert "no captures" in label
+    assert style == "yellow"
+
+
+def test_health_healthy() -> None:
+    """Timestamp within 5 minutes → "healthy", "green"."""
+    from datetime import datetime
+    label, style = cli._health_status(9999, datetime.now().isoformat())
+    assert label == "healthy"
+    assert style == "green"
+
+
+def test_health_stale() -> None:
+    """Timestamp older than 5 minutes → "stale", "yellow"."""
+    from datetime import datetime, timedelta
+    old = (datetime.now() - timedelta(minutes=10)).isoformat()
+    label, style = cli._health_status(9999, old)
+    assert "stale" in label
+    assert style == "yellow"
+
+
+def test_health_tz_aware_timestamp() -> None:
+    """Offset-aware timestamps don't cause TypeError in subtraction."""
+    label, style = cli._health_status(9999, "2026-04-22T14:00:00+08:00")
+    assert label in ("healthy", "stale (no captures in >5m)")
+    assert "red" not in style  # not stopped
+
+
+def test_health_malformed_timestamp() -> None:
+    """Unparseable timestamps are handled gracefully."""
+    label, style = cli._health_status(9999, "not-a-timestamp")
+    assert label == "running"
+    assert style == "green"
+
+
+def test_last_capture_none_when_dir_missing(ac_root: Path) -> None:
+    """No capture-buffer dir → (None, None)."""
+    ts, app = cli._last_capture_info()
+    assert ts is None
+    assert app is None
+
+
+def test_last_capture_finds_newest(ac_root: Path) -> None:
+    """Returns timestamp and app_name from the most recent buffer file."""
+    import json
+    from openchronicle import paths
+
+    buf = paths.capture_buffer_dir()
+    buf.mkdir(parents=True, exist_ok=True)
+    (buf / "c1.json").write_text(json.dumps({
+        "timestamp": "2026-04-22T14:00:00+08:00",
+        "window_meta": {"app_name": "Cursor"},
+    }))
+    (buf / "c2.json").write_text(json.dumps({
+        "timestamp": "2026-04-22T14:05:00+08:00",
+        "window_meta": {"app_name": "Safari"},
+    }))
+
+    ts, app = cli._last_capture_info()
+    assert ts == "2026-04-22T14:05:00+08:00", f"got ts={ts!r}"
+    assert app == "Safari", f"got app={app!r}"
+
+
+def test_last_capture_handles_corrupted_json(ac_root: Path) -> None:
+    """Corrupted JSON returns the filename stem as timestamp, None for app."""
+    from openchronicle import paths
+
+    buf = paths.capture_buffer_dir()
+    buf.mkdir(parents=True, exist_ok=True)
+    (buf / "bad.json").write_text("{not valid json")
+
+    ts, app = cli._last_capture_info()
+    assert ts == "bad"
+    assert app is None
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Status command integration tests
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_status_renders_new_fields(ac_root: Path) -> None:
+    """Status output includes Version, Uptime, Health, and Last Capture."""
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["status"])
+    assert result.exit_code == 0, result.output
+    assert "Version" in result.output
+    assert "Uptime" in result.output
+    assert "Health" in result.output
+    assert "Last Capture" in result.output
+
+
+def test_status_shows_version(ac_root: Path) -> None:
+    """Status table includes the installed version string."""
+    from openchronicle import __version__
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["status"])
+    assert result.exit_code == 0
+    assert __version__ in result.output

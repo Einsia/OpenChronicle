@@ -91,12 +91,18 @@ def _load_captures(capture_files: list[Path]) -> list[tuple[Path, dict]]:
     """
     parsed: list[tuple[Path, dict]] = []
     for p in capture_files:
+        # read_bytes() + json.loads handles BOM/encoding sniffing; read_text()
+        # would raise UnicodeDecodeError (a ValueError, not OSError) on a
+        # mis-encoded file and crash the aggregator instead of dropping it.
         try:
-            data = json.loads(p.read_text())
-        except (OSError, json.JSONDecodeError):
+            data = json.loads(p.read_bytes())
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("timeline: failed to load capture %s: %s", p.name, exc)
             continue
-        if isinstance(data, dict):
-            parsed.append((p, data))
+        if not isinstance(data, dict):
+            logger.warning("timeline: capture %s is not a JSON object", p.name)
+            continue
+        parsed.append((p, data))
     return parsed
 
 
@@ -214,10 +220,14 @@ def produce_block_for_window(
     # fallback so an LLM miss doesn't trigger a second pass over the same files.
     parsed = _load_captures(capture_files)
     events_text, apps_used = _format_events(parsed)
+    # Use len(parsed) — capture_count must match what the LLM actually sees
+    # and what _heuristic_entries can group; len(capture_files) overcounts
+    # whenever _load_captures drops a corrupt or non-dict file.
+    capture_count = len(parsed)
     prompt = load_prompt("timeline_block.md").format(
         start_time=_format_window(start),
         end_time=_format_window(end),
-        capture_count=len(capture_files),
+        capture_count=capture_count,
         events_text=events_text,
     )
 
@@ -248,13 +258,13 @@ def produce_block_for_window(
         timezone=start.tzname() or "",
         entries=entries,
         apps_used=apps_used,
-        capture_count=len(capture_files),
+        capture_count=capture_count,
     )
     store.insert(conn, block)
     logger.info(
         "timeline: stored block %s — %s → %s (%d entries, %d captures, apps=%s)",
         block.id, start.isoformat(), end.isoformat(),
-        len(entries), len(capture_files), ", ".join(apps_used),
+        len(entries), capture_count, ", ".join(apps_used),
     )
     return block
 

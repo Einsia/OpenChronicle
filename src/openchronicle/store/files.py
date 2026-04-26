@@ -49,6 +49,17 @@ def atomic_write_text(path: Path, content: str) -> None:
         with contextlib.suppress(FileNotFoundError):
             os.chmod(tmp_path, path.stat().st_mode & 0o7777)
         os.replace(tmp_path, path)
+        # Persist the directory entry so a power loss right after the
+        # rename can't leave the dir pointing at neither old nor new.
+        # macOS APFS sometimes returns EINVAL on directory fsync; the
+        # call is best-effort — failure here is strictly less safe than
+        # success, never less safe than skipping.
+        with contextlib.suppress(OSError):
+            dir_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
     except BaseException:
         with contextlib.suppress(OSError):
             tmp_path.unlink()

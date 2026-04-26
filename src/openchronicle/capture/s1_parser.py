@@ -16,7 +16,6 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any
 
 from .ax_models import ax_app_to_markdown
@@ -118,20 +117,22 @@ def enrich(capture: dict[str, Any]) -> None:
 
     title = _get_window_title(app_data, capture)
 
-    if bundle in _EDITOR_BUNDLES and title:
+    capture["editor_file"] = None
+    capture["editor_project"] = None
+    capture["editor_git_branch"] = None
+    capture["terminal_cwd"] = None
+
+    if not title:
+        return
+
+    if bundle in _EDITOR_BUNDLES:
         editor_info = _extract_editor_info(title, bundle)
         capture["editor_file"] = editor_info[0]
         capture["editor_project"] = editor_info[1]
         capture["editor_git_branch"] = editor_info[2]
-    else:
-        capture["editor_file"] = None
-        capture["editor_project"] = None
-        capture["editor_git_branch"] = None
 
-    if bundle in _TERMINAL_BUNDLES and title:
+    if bundle in _TERMINAL_BUNDLES:
         capture["terminal_cwd"] = _extract_terminal_cwd(title)
-    else:
-        capture["terminal_cwd"] = None
 
 
 def _frontmost_app(ax_tree: dict[str, Any]) -> dict[str, Any] | None:
@@ -256,11 +257,12 @@ def _extract_editor_info(
 
     # 4. No em dash — try ASCII " - " as a weaker separator.
     #    Only split when both sides look meaningful (avoid splitting
-    #    filenames like "my-app.ts").
+    #    filenames like "my-app.ts").  When the title is "file - project",
+    #    left is the file and right is the project — same order as em-dash.
     if " - " in core:
         left, _, right = core.partition(" - ")
         if _looks_like_filename(left) and _looks_like_filename(right):
-            return _clean_file_token(right) or None, _clean_file_token(left) or None, branch
+            return _clean_file_token(left) or None, _clean_file_token(right) or None, branch
 
     # 5. No recognisable separator — the entire title is the filename.
     file_part = _clean_file_token(core)
@@ -294,12 +296,12 @@ def _extract_terminal_cwd(title: str) -> str | None:
         token = token.strip()
         if not token:
             continue
-        # SSH-style: user@host:/path (optional whitespace after colon).
-        ssh_m = re.match(r"^[^@]+@[^:]+:\s*(/.+)$", token)
+        # SSH-style: user@host:/path or user@host:~/path
+        # (optional whitespace after colon).
+        ssh_m = re.match(r"^[^@]+@[^:]+:\s*([~/].+)$", token)
         if ssh_m:
-            return ssh_m.group(1)
-        # Local path: ~/…, /…, ./…
-        if token.startswith(("~/", "./", "/")):
-            expanded = os.path.expanduser(token)
-            return str(Path(expanded).resolve())
+            return os.path.normpath(os.path.expanduser(ssh_m.group(1)))
+        # Local path: ~/…, /…  (no ./ — relative to the daemon CWD, meaningless).
+        if token.startswith(("/", "~")):
+            return os.path.normpath(os.path.expanduser(token))
     return None

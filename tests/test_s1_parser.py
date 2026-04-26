@@ -288,13 +288,11 @@ def test_extract_terminal_cwd_default() -> None:
 
 
 def test_extract_terminal_cwd_absolute_path() -> None:
-    """Absolute path in terminal title.  Path.resolve() canonicalises symlinks
-    (/tmp → /private/tmp on macOS), so compare against the real path."""
-    import os
+    """Absolute path in terminal title."""
     cwd = s1_parser._extract_terminal_cwd(
         "/tmp/build — bash — 80x24"
     )
-    assert cwd == os.path.realpath("/tmp/build")
+    assert cwd == "/tmp/build"
 
 
 # ── enrich() integration with editor fields ──────────────────────────────────

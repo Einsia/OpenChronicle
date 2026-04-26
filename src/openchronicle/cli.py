@@ -15,9 +15,9 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from . import __version__, paths
 from . import config as config_mod
 from . import logger as logger_mod
-from . import __version__, paths
 from .store import entries as entries_mod
 from .store import fts, index_md
 
@@ -56,7 +56,6 @@ def _read_pid() -> int | None:
     return pid if _is_pid_alive(pid) else None
 
 
-
 def _daemon_uptime() -> str:
     """Return a human-readable uptime string for the running daemon.
 
@@ -73,7 +72,7 @@ def _daemon_uptime() -> str:
         delta = now - datetime.fromtimestamp(mtime).astimezone()
         h, r = divmod(int(delta.total_seconds()), 3600)
         m = r // 60
-        if h > 24:
+        if h >= 24:
             return f"{h // 24}d {h % 24}h"
         if h:
             return f"{h}h {m}m"

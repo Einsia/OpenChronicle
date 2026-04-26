@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
-from openchronicle import cli
+from openchronicle import __version__, cli, paths
 from openchronicle.writer import llm as llm_mod
 
 
@@ -92,21 +94,15 @@ def test_daemon_uptime_stopped_when_no_pid(ac_root: Path) -> None:
     assert cli._daemon_uptime() == "stopped"
 
 
-def test_daemon_uptime_running(ac_root: Path) -> None:
+def test_daemon_uptime_running(ac_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Returns a human-readable uptime when PID file exists."""
-    pid_file = __import__("openchronicle.paths", fromlist=["paths"]).pid_file()
-    pid_file.write_text("99999")  # non-existent but alive enough for _read_pid
+    paths.pid_file().write_text("99999")
+    monkeypatch.setattr(cli, "_read_pid", lambda: 99999)
 
-    def fake_read_pid():
-        return 99999
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(cli, "_read_pid", fake_read_pid)
-    try:
-        uptime = cli._daemon_uptime()
-        assert uptime != "stopped"
-        assert "m" in uptime  # recently started, should be in minutes
-    finally:
-        monkeypatch.undo()
+    uptime = cli._daemon_uptime()
+
+    assert uptime != "stopped"
+    assert "m" in uptime  # recently created PID file → minutes-level uptime
 
 
 def test_health_stopped() -> None:
@@ -125,7 +121,6 @@ def test_health_running_no_captures() -> None:
 
 def test_health_healthy() -> None:
     """Timestamp within 5 minutes → "healthy", "green"."""
-    from datetime import datetime
     label, style = cli._health_status(9999, datetime.now().isoformat())
     assert label == "healthy"
     assert style == "green"
@@ -133,7 +128,6 @@ def test_health_healthy() -> None:
 
 def test_health_stale() -> None:
     """Timestamp older than 5 minutes → "stale", "yellow"."""
-    from datetime import datetime, timedelta
     old = (datetime.now() - timedelta(minutes=10)).isoformat()
     label, style = cli._health_status(9999, old)
     assert "stale" in label
@@ -163,9 +157,6 @@ def test_last_capture_none_when_dir_missing(ac_root: Path) -> None:
 
 def test_last_capture_finds_newest(ac_root: Path) -> None:
     """Returns timestamp and app_name from the most recent buffer file."""
-    import json
-    from openchronicle import paths
-
     buf = paths.capture_buffer_dir()
     buf.mkdir(parents=True, exist_ok=True)
     (buf / "c1.json").write_text(json.dumps({
@@ -184,8 +175,6 @@ def test_last_capture_finds_newest(ac_root: Path) -> None:
 
 def test_last_capture_handles_corrupted_json(ac_root: Path) -> None:
     """Corrupted JSON returns the filename stem as timestamp, None for app."""
-    from openchronicle import paths
-
     buf = paths.capture_buffer_dir()
     buf.mkdir(parents=True, exist_ok=True)
     (buf / "bad.json").write_text("{not valid json")
@@ -213,7 +202,6 @@ def test_status_renders_new_fields(ac_root: Path) -> None:
 
 def test_status_shows_version(ac_root: Path) -> None:
     """Status table includes the installed version string."""
-    from openchronicle import __version__
     runner = CliRunner()
     result = runner.invoke(cli.app, ["status"])
     assert result.exit_code == 0

@@ -150,26 +150,33 @@ class EventDispatcher:
             "AXApplicationActivated",
         )
 
-        if (
-            not is_focus_change
-            and key == self._last_capture_key
-            and (now - self._last_capture_monotonic) < self._same_window_dedup
-        ):
-            logger.debug(
-                "capture skipped (same-window dedup <%.1fs): %s",
-                self._same_window_dedup, trigger["window_title"][:40],
-            )
-            return
+        # Decide-and-commit under the lock: this method is called from both the
+        # watcher reader thread (immediate events) and the debounce Timer
+        # thread, so reading then writing _last_capture_* without serialization
+        # races and lets two near-simultaneous events bypass dedup/rate-limit.
+        # Keep _capture_fn outside the lock so a slow callback can't stall the
+        # other thread.
+        with self._lock:
+            if (
+                not is_focus_change
+                and key == self._last_capture_key
+                and (now - self._last_capture_monotonic) < self._same_window_dedup
+            ):
+                logger.debug(
+                    "capture skipped (same-window dedup <%.1fs): %s",
+                    self._same_window_dedup, trigger["window_title"][:40],
+                )
+                return
 
-        gap = now - self._last_capture_monotonic
-        if gap < self._min_capture_gap and not is_focus_change:
-            logger.debug(
-                "capture skipped (rate limit %.1fs): %s", gap, event_type
-            )
-            return
+            gap = now - self._last_capture_monotonic
+            if gap < self._min_capture_gap and not is_focus_change:
+                logger.debug(
+                    "capture skipped (rate limit %.1fs): %s", gap, event_type
+                )
+                return
 
-        self._last_capture_key = key
-        self._last_capture_monotonic = now
+            self._last_capture_key = key
+            self._last_capture_monotonic = now
 
         try:
             self._capture_fn(trigger)

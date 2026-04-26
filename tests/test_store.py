@@ -1,11 +1,19 @@
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
-from openchronicle.store import entries as entries_mod
-from openchronicle.store import files as files_mod
-from openchronicle.store import fts
-from openchronicle.store import index_md
+from openchronicle.store import (
+    entries as entries_mod,
+)
+from openchronicle.store import (
+    files as files_mod,
+)
+from openchronicle.store import (
+    fts,
+    index_md,
+)
 
 
 def test_make_id_uniqueness() -> None:
@@ -69,11 +77,10 @@ def test_supersede_filters_old_by_default(ac_root: Path) -> None:
 
 
 def test_invalid_prefix_rejected(ac_root: Path) -> None:
-    with fts.cursor() as conn:
-        with pytest.raises(ValueError):
-            entries_mod.create_file(
-                conn, name="random-notes.md", description="desc", tags=[]
-            )
+    with fts.cursor() as conn, pytest.raises(ValueError):
+        entries_mod.create_file(
+            conn, name="random-notes.md", description="desc", tags=[]
+        )
 
 
 def test_rebuild_index_round_trip(ac_root: Path) -> None:
@@ -108,3 +115,74 @@ def test_index_md_rebuild_runs(ac_root: Path) -> None:
     out = (paths.memory_dir() / "index.md").read_text()
     assert "# Memory Index" in out
     assert "user-profile.md" in out
+
+
+def test_atomic_write_preserves_original_on_replace_failure(tmp_path: Path) -> None:
+    """Simulating a crash at the rename step must leave the file intact.
+
+    A SIGKILL between ``write_text``'s first byte and last byte truncates
+    the file under the previous code; under ``atomic_write_text`` the
+    rename is the only externally-visible step so a failure there leaves
+    the original content untouched and any temp file cleaned up.
+    """
+    target = tmp_path / "memory.md"
+    original = "ORIGINAL CONTENT\nline 2\n"
+    target.write_text(original)
+
+    real_replace = os.replace
+    boom = OSError("simulated rename failure")
+    with (
+        patch("openchronicle.store.files.os.replace", side_effect=boom),
+        pytest.raises(OSError),
+    ):
+        files_mod.atomic_write_text(target, "NEW CONTENT THAT NEVER LANDS")
+
+    assert target.read_text() == original
+    # No leftover .tmp files
+    leftovers = [p for p in tmp_path.iterdir() if p.name != "memory.md"]
+    assert leftovers == [], f"unexpected leftover files: {leftovers}"
+
+    # Sanity: a normal call still works once we restore replace
+    assert os.replace is real_replace
+    files_mod.atomic_write_text(target, "NEW CONTENT")
+    assert target.read_text() == "NEW CONTENT"
+
+
+def test_atomic_write_creates_parent_directory(tmp_path: Path) -> None:
+    nested = tmp_path / "nested" / "dir" / "file.md"
+    files_mod.atomic_write_text(nested, "hello")
+    assert nested.read_text() == "hello"
+
+
+def test_atomic_write_preserves_existing_permissions(tmp_path: Path) -> None:
+    """Overwriting must not silently downgrade an existing file's mode.
+
+    ``tempfile.mkstemp`` creates files at 0o600 — without explicit
+    chmod the rename would replace a user's 0o644 file with a 0o600
+    one, a hidden behavior change from ``Path.write_text``.
+    """
+    target = tmp_path / "memory.md"
+    target.write_text("original")
+    target.chmod(0o644)
+
+    files_mod.atomic_write_text(target, "updated")
+
+    assert target.read_text() == "updated"
+    assert (target.stat().st_mode & 0o777) == 0o644
+
+
+def test_atomic_write_round_trip_through_append_entry(ac_root: Path) -> None:
+    """End-to-end: append → read returns the new entry, file isn't corrupted."""
+    with fts.cursor() as conn:
+        entries_mod.create_file(
+            conn, name="topic-rust-async.md",
+            description="Rust async patterns", tags=["topic"],
+        )
+        entries_mod.append_entry(
+            conn, name="topic-rust-async.md",
+            content="Tokio's `select!` polls all branches each iteration.",
+            tags=["topic", "rust"],
+        )
+    parsed = files_mod.read_file(files_mod.memory_path("topic-rust-async.md"))
+    assert len(parsed.entries) == 1
+    assert "Tokio" in parsed.entries[0].body

@@ -1,0 +1,12 @@
+{
+  "focused_element": {
+    "role": "AXTextField",
+    "title": "",
+    "value": "anthropic.com",
+    "is_editable": true,
+    "has_value": true,
+    "value_length": 13
+  },
+  "visible_text": "## Safari [active]\n_com.apple.Safari_\n### \n- [TextField] anthropic.com",
+  "url": "https://anthropic.com"
+}

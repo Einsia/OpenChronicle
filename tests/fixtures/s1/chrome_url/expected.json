@@ -1,0 +1,12 @@
+{
+  "focused_element": {
+    "role": "AXTextField",
+    "title": "Address and search bar",
+    "value": "https://www.anthropic.com/news",
+    "is_editable": true,
+    "has_value": true,
+    "value_length": 30
+  },
+  "visible_text": "## Google Chrome [active]\n_com.google.Chrome_\n### Anthropic — Claude Code\n- [TextField] Address and search bar — https://www.anthropic.com/news",
+  "url": "https://www.anthropic.com/news"
+}

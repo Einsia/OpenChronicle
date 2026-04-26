@@ -172,3 +172,125 @@ def test_current_context_app_filter(ac_root: Path) -> None:
 
     ctx = captures_mod.current_context(app_filter="Safari", headline_limit=5)
     assert [h["file_stem"] for h in ctx["recent_captures_headline"]] == ["c2"]
+
+
+# ── S1 editor / terminal fields exposed through MCP tools ───────────────────
+
+
+def _write_capture_json(ac_root: Path, stem: str, capture: dict) -> None:
+    """Write a capture JSON to the buffer directory with the given stem."""
+    import json
+
+    from openchronicle import paths
+
+    buf = paths.capture_buffer_dir()
+    filepath = buf / f"{stem}.json"
+    filepath.write_text(json.dumps(capture, ensure_ascii=False))
+
+
+def test_read_recent_capture_exposes_editor_fields(ac_root: Path) -> None:
+    """Agent calls read_recent_capture → response includes editor_file etc."""
+    _write_capture_json(ac_root, "2026-04-26T14-30-00p08-00", {
+        "timestamp": "2026-04-26T14:30:00+08:00",
+        "schema_version": 2,
+        "window_meta": {
+            "app_name": "Code",
+            "title": "main.py — openchronicle [git:main] - Visual Studio Code",
+            "bundle_id": "com.microsoft.VSCode",
+        },
+        "ax_tree": {},
+        "focused_element": {
+            "role": "AXTextArea", "title": "editor",
+            "value": "def foo(): pass", "is_editable": True,
+            "value_length": 16,
+        },
+        "visible_text": "## Code\n### main.py\n- [AXTextArea] editor — def foo(): pass",
+        "url": None,
+        "editor_file": "main.py",
+        "editor_project": "openchronicle",
+        "editor_git_branch": "git:main",
+        "terminal_cwd": None,
+        "screenshot_stripped": True,
+    })
+
+    result = captures_mod.read_recent_capture(
+        at="2026-04-26T14:30:00+08:00", app_name="Code",
+    )
+    assert result is not None, "should find the VS Code capture"
+    assert result["editor_file"] == "main.py"
+    assert result["editor_project"] == "openchronicle"
+    assert result["editor_git_branch"] == "git:main"
+    assert result["terminal_cwd"] is None
+
+
+def test_read_recent_capture_exposes_terminal_cwd(ac_root: Path) -> None:
+    """Agent calls read_recent_capture on iTerm2 → response includes terminal_cwd."""
+    import os
+    home = os.path.expanduser("~")
+
+    _write_capture_json(ac_root, "2026-04-26T14-35-00p08-00", {
+        "timestamp": "2026-04-26T14:35:00+08:00",
+        "schema_version": 2,
+        "window_meta": {
+            "app_name": "iTerm2",
+            "title": "vim — ~/projects/foo — zsh",
+            "bundle_id": "com.googlecode.iterm2",
+        },
+        "ax_tree": {},
+        "focused_element": {
+            "role": "AXTextArea", "title": "terminal",
+            "value": "$ ls", "is_editable": False,
+            "value_length": 4,
+        },
+        "visible_text": "## iTerm2\n### vim — ~/projects/foo — zsh\n- [AXTextArea] terminal — $ ls",
+        "url": None,
+        "editor_file": None,
+        "editor_project": None,
+        "editor_git_branch": None,
+        "terminal_cwd": f"{home}/projects/foo",
+        "screenshot_stripped": True,
+    })
+
+    result = captures_mod.read_recent_capture(
+        at="2026-04-26T14:35:00+08:00", app_name="iTerm2",
+    )
+    assert result is not None, "should find the iTerm2 capture"
+    assert result["terminal_cwd"] == f"{home}/projects/foo"
+    assert result["editor_file"] is None
+    assert result["editor_project"] is None
+
+
+def test_read_recent_capture_non_editor_has_null_fields(ac_root: Path) -> None:
+    """Agent calls read_recent_capture on a non-editor app → fields are None."""
+    _write_capture_json(ac_root, "2026-04-26T14-40-00p08-00", {
+        "timestamp": "2026-04-26T14:40:00+08:00",
+        "schema_version": 2,
+        "window_meta": {
+            "app_name": "Safari",
+            "title": "Example",
+            "bundle_id": "com.apple.Safari",
+        },
+        "ax_tree": {},
+        "focused_element": {
+            "role": "AXStaticText", "title": "",
+            "value": "some content", "is_editable": False,
+            "value_length": 12,
+        },
+        "visible_text": "## Safari\n### Example\n- some content",
+        "url": "https://example.com",
+        "editor_file": None,
+        "editor_project": None,
+        "editor_git_branch": None,
+        "terminal_cwd": None,
+        "screenshot_stripped": True,
+    })
+
+    result = captures_mod.read_recent_capture(
+        at="2026-04-26T14:40:00+08:00", app_name="Safari",
+    )
+    assert result is not None, "should find the Safari capture"
+    assert result["url"] == "https://example.com"
+    assert result["editor_file"] is None
+    assert result["editor_project"] is None
+    assert result["editor_git_branch"] is None
+    assert result["terminal_cwd"] is None

@@ -94,13 +94,12 @@ def _last_capture_info() -> tuple[str | None, str | None]:
     if not json_files:
         return None, None
     try:
-        import json as _json
-        data = _json.loads(json_files[-1].read_text())
+        data = json.loads(json_files[-1].read_bytes())
         ts = data.get("timestamp")
         meta = data.get("window_meta") or {}
         app = meta.get("app_name")
         return ts, app
-    except (OSError, _json.JSONDecodeError):
+    except (OSError, ValueError):
         return json_files[-1].stem, None
 
 
@@ -210,7 +209,7 @@ def status() -> None:
     table.add_row("Health", f"[{health_style}]{health_label}[/{health_style}]")
     table.add_row("Capture", "[yellow]paused[/yellow]" if paused else "active")
 
-    if last_ts and last_app:
+    if last_ts:
         try:
             last_dt = datetime.fromisoformat(last_ts)
             age = (datetime.now(last_dt.tzinfo) - last_dt).total_seconds()
@@ -220,11 +219,9 @@ def status() -> None:
                 ago = f"{int(age // 60)}m ago"
             else:
                 ago = f"{int(age // 3600)}h ago"
-            table.add_row("Last Capture", f"{ago} ({last_app})")
+            table.add_row("Last Capture", f"{ago} ({last_app})" if last_app else ago)
         except (ValueError, TypeError):
             table.add_row("Last Capture", last_ts)
-    elif last_ts:
-        table.add_row("Last Capture", last_ts)
     else:
         table.add_row("Last Capture", "(none)")
 

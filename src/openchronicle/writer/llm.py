@@ -13,6 +13,20 @@ from ..logger import get
 
 logger = get("openchronicle.writer")
 
+# litellm.completion() defaults to no client-side timeout and zero
+# retries. Without these, a stuck connection (slow provider, partial
+# response, dead TCP socket) blocks the reducer / classifier daemon
+# thread *forever* — the daemon stays "alive" but no durable facts
+# get written.  Two minutes is generous for a long session reduce
+# without being absurdly long; a slow local model can override per
+# stage via ``[models.<stage>] timeout_seconds = N``.
+DEFAULT_TIMEOUT_SECONDS = 120
+# Two retries gives 3 total attempts. litellm uses tenacity-style
+# backoff between attempts and respects Retry-After headers from
+# providers, so this is enough to absorb a brief 429 / 502 blip
+# without piling on extra latency.
+DEFAULT_NUM_RETRIES = 2
+
 
 @dataclass
 class PingResult:
@@ -42,9 +56,21 @@ def call_llm(
     import litellm  # imported lazily to keep CLI startup fast
 
     model_cfg = cfg.model_for(stage)
+    timeout = (
+        model_cfg.timeout_seconds
+        if model_cfg.timeout_seconds is not None
+        else DEFAULT_TIMEOUT_SECONDS
+    )
+    num_retries = (
+        model_cfg.num_retries
+        if model_cfg.num_retries is not None
+        else DEFAULT_NUM_RETRIES
+    )
     kwargs: dict[str, Any] = {
         "model": model_cfg.model,
         "messages": messages,
+        "timeout": timeout,
+        "num_retries": num_retries,
     }
     if model_cfg.base_url:
         kwargs["api_base"] = model_cfg.base_url
@@ -59,7 +85,10 @@ def call_llm(
     if model_cfg.max_tokens:
         kwargs["max_tokens"] = model_cfg.max_tokens
 
-    logger.debug("llm call stage=%s model=%s", stage, model_cfg.model)
+    logger.debug(
+        "llm call stage=%s model=%s timeout=%ds retries=%d",
+        stage, model_cfg.model, timeout, num_retries,
+    )
     return litellm.completion(**kwargs)
 
 

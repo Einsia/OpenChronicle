@@ -82,6 +82,20 @@ def _contains_sequence(tokens: Sequence[str], sequence: Sequence[str]) -> bool:
     return any(tuple(tokens[i : i + len(sequence)]) == tuple(sequence) for i in range(last_start + 1))
 
 
+def _is_blocked_keyevent(value: str) -> bool:
+    token = value.lower()
+    raw_key = token.removeprefix("keycode_")
+    if token in _BLOCKED_KEYEVENTS or raw_key in _BLOCKED_KEYEVENTS:
+        return True
+    try:
+        numeric_key = str(int(raw_key, 0))
+    except ValueError:
+        if not raw_key.isdecimal():
+            return False
+        numeric_key = str(int(raw_key, 10))
+    return numeric_key in _BLOCKED_KEYEVENTS
+
+
 def assert_safe(args: Sequence[str]) -> None:
     """Reject destructive or privilege-escalating ADB commands.
 
@@ -114,11 +128,8 @@ def assert_safe(args: Sequence[str]) -> None:
 
     if _contains_sequence(shell_tokens, ("input", "keyevent")):
         idx = shell_tokens.index("keyevent")
-        if idx + 1 < len(shell_tokens):
-            key = shell_tokens[idx + 1].removeprefix("keycode_")
-            original = shell_tokens[idx + 1]
-            if original in _BLOCKED_KEYEVENTS or key in _BLOCKED_KEYEVENTS:
-                raise ADBSafetyError(f"blocked high-risk keyevent: {shell_tokens[idx + 1]}")
+        if idx + 1 < len(shell_tokens) and _is_blocked_keyevent(shell_tokens[idx + 1]):
+            raise ADBSafetyError(f"blocked high-risk keyevent: {shell_tokens[idx + 1]}")
 
 
 def validate_input_text(text: str) -> str:

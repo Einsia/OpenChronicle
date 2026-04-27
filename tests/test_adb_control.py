@@ -53,11 +53,23 @@ def test_safety_blocks_destructive_commands() -> None:
             assert_safe(command)
 
 
+def test_safety_blocks_keyevent_numeric_aliases() -> None:
+    blocked = [
+        ["shell", "input", "keyevent", "0x1a"],
+        ["shell", "input", "keyevent", "0XDF"],
+        ["shell", "input", "keyevent", "000224"],
+        ["shell", "input", "keyevent", "KEYCODE_WAKEUP"],
+    ]
+    for command in blocked:
+        with pytest.raises(ADBSafetyError):
+            assert_safe(command)
+
+
 def test_safety_allows_mvp_commands() -> None:
     allowed = [
         ["devices", "-l"],
         ["exec-out", "screencap", "-p"],
-        ["shell", "uiautomator", "dump", "/sdcard/window.xml"],
+        ["shell", "uiautomator", "dump", "/data/local/tmp/window.xml"],
         ["shell", "input", "tap", "100", "200"],
         ["shell", "input", "swipe", "100", "900", "100", "100", "300"],
         ["shell", "input", "keyevent", "BACK"],
@@ -68,7 +80,9 @@ def test_safety_allows_mvp_commands() -> None:
 
 
 def test_parse_devices() -> None:
-    output = """List of devices attached
+    output = """* daemon not running; starting now at tcp:5037
+* daemon started successfully
+List of devices attached
 emulator-5554 device product:sdk_gphone_x86_64 model:sdk_gphone64 transport_id:1
 R58M123 offline usb:1-1
 """
@@ -77,6 +91,10 @@ R58M123 offline usb:1-1
     assert devices[0]["state"] == "device"
     assert devices[0]["qualifiers"]["product"] == "sdk_gphone_x86_64"
     assert devices[1]["state"] == "offline"
+
+
+def test_parse_devices_without_header_returns_empty() -> None:
+    assert _parse_devices("* daemon started successfully\n") == []
 
 
 def test_list_devices_writes_openchronicle_event(ac_root) -> None:
@@ -112,3 +130,41 @@ def test_blocked_input_text_is_recorded(ac_root) -> None:
 def test_adb_mcp_server_builds() -> None:
     server = adb_server.build_server(controller=ADBController(client=FakeADBClient()))
     assert server is not None
+
+
+def test_logcat_filter_rejects_flags(ac_root) -> None:
+    controller = ADBController(client=FakeADBClient(), recorder=ADBMemoryRecorder())
+
+    result = controller.read_logcat(filter_expr="-c")
+
+    assert result["ok"] is False
+    assert result["blocked"] is True
+    assert not controller.client.calls
+
+
+def test_logcat_filter_allows_tag_specs(ac_root) -> None:
+    controller = ADBController(client=FakeADBClient(stdout="I/Test: hello"))
+
+    result = controller.read_logcat(filter_expr="Test:D *:S")
+
+    assert result["ok"] is True
+    assert controller.client.calls[-1][0] == ["logcat", "-d", "-t", "200", "Test:D", "*:S"]
+
+
+def test_dump_ui_uses_data_local_tmp() -> None:
+    client = FakeADBClient(stdout="UI hierarchy dumped to: /data/local/tmp/window.xml")
+    controller = ADBController(client=client)
+
+    controller.dump_ui()
+
+    assert client.calls[0][0] == ["shell", "uiautomator", "dump", "/data/local/tmp/window.xml"]
+    assert client.calls[1][0] == ["exec-out", "cat", "/data/local/tmp/window.xml"]
+
+
+def test_current_app_uses_bounded_dumpsys_window_command() -> None:
+    client = FakeADBClient(stdout="mCurrentFocus=Window{u0 com.example/.MainActivity}")
+    controller = ADBController(client=client)
+
+    controller.current_app()
+
+    assert client.calls[-1][0] == ["shell", "dumpsys", "window", "windows"]

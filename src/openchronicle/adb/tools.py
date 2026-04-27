@@ -20,7 +20,14 @@ _COMPONENT_RE = re.compile(r"(?P<package>[A-Za-z0-9_.$]+)/(?P<activity>[A-Za-z0-
 
 def _parse_devices(output: str) -> list[dict[str, Any]]:
     devices: list[dict[str, Any]] = []
-    for raw_line in output.splitlines()[1:]:
+    lines = output.splitlines()
+    try:
+        header_idx = next(
+            i for i, line in enumerate(lines) if "List of devices attached" in line
+        )
+    except StopIteration:
+        return []
+    for raw_line in lines[header_idx + 1 :]:
         line = raw_line.strip()
         if not line:
             continue
@@ -244,7 +251,7 @@ class ADBController:
 
     def dump_ui(self, device_id: str | None = None) -> dict[str, Any]:
         tool = "adb_dump_ui"
-        dump_path = "/sdcard/window.xml"
+        dump_path = "/data/local/tmp/window.xml"
         command = ["shell", "uiautomator", "dump", dump_path]
         cat_command = ["exec-out", "cat", dump_path]
         params = {"device_id": device_id}
@@ -424,7 +431,7 @@ class ADBController:
 
     def current_app(self, device_id: str | None = None) -> dict[str, Any]:
         tool = "adb_current_app"
-        command = ["shell", "dumpsys", "window"]
+        command = ["shell", "dumpsys", "window", "windows"]
         params = {"device_id": device_id}
         display = self.client.command_for_display(command, device_id)
         try:
@@ -525,7 +532,14 @@ class ADBController:
                 return self._blocked_payload(
                     tool_name=tool, device_id=device_id, command=display, params=params, exc=exc
                 )
-            command.extend(filter_expr.split())
+            filter_tokens = filter_expr.split()
+            if any(token.startswith("-") for token in filter_tokens):
+                exc = safety.ADBSafetyError("filter_expr cannot contain logcat flags")
+                display = self.client.command_for_display(command, device_id)
+                return self._blocked_payload(
+                    tool_name=tool, device_id=device_id, command=display, params=params, exc=exc
+                )
+            command.extend(filter_tokens)
         display = self.client.command_for_display(command, device_id)
         try:
             result = self.client.run(command, device_id=device_id, timeout=30)

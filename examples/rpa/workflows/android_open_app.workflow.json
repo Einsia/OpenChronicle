@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "id": "android_open_app",
+  "name": "Open Android app",
+  "provider": "android_adb",
+  "platform": "android",
+  "inputs": {
+    "package": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "steps": [
+    {
+      "id": "launch",
+      "action": "launch_app",
+      "package": "{{package}}"
+    },
+    {
+      "id": "settle",
+      "action": "wait",
+      "seconds": 1
+    }
+  ],
+  "failure_policy": {
+    "retry": 1,
+    "on_unknown_page": "stop_and_log",
+    "on_sensitive_page": "takeover"
+  },
+  "memory": {
+    "save_trace": true,
+    "save_keyframes": true,
+    "distill_to_skill": true
+  }
+}

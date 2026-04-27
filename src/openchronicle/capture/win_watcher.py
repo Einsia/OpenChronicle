@@ -377,7 +377,7 @@ def _get_class_name(hwnd: int) -> str:
 # carries some signal for debugging without polluting the mac AX
 # vocabulary with garbage.
 _CLASSNAME_TO_ROLE = {
-    "Edit":              "AXTextField",
+    "Edit":              "AXEdit",
     "RICHEDIT50W":       "AXTextArea",
     "RICHEDIT60":        "AXTextArea",
     "RichEditA":         "AXTextArea",
@@ -589,7 +589,7 @@ class _TextInputAggregator:
         # Resolve the focused HWND of the burst-target window. This is
         # the closest Win32 analogue to mac's ``focusedElement`` AX call.
         # When the control is a password edit, _describe_hwnd returns
-        # role=AXTextField + subrole=AXSecureTextField + value=[REDACTED]
+        # role=AXEdit + subrole=AXSecureTextField + value=[REDACTED]
         # so the schema matches mac's secure-field redaction exactly.
         focus_hwnd = _focused_hwnd_for_window(hwnd) or hwnd
         element = _describe_hwnd(focus_hwnd)

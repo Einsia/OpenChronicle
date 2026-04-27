@@ -94,10 +94,9 @@ $controlType = [System.Windows.Automation.ControlType]
 
 # ─── Mac AX role parity ─────────────────────────────────────────────────
 #
-# Maps UIA ControlType.ProgrammaticName ("ControlType.Edit") to a mac AX
-# role string. The downstream s1_parser keys off mac role names (AXTextField
-# for the address bar, AXTextArea for editors, ...), so this mapping is the
-# single most important thing for cross-platform parity.
+# Maps UIA ControlType.ProgrammaticName ("ControlType.Edit") to the
+# normalized role vocabulary consumed by s1_parser. Windows edit controls keep
+# the distinct AXEdit role while still participating in editable/url-bar logic.
 
 $ROLE_MAP = @{
     "Window"       = "AXWindow"
@@ -109,7 +108,7 @@ $ROLE_MAP = @{
     "Calendar"     = "AXGroup"
     "SemanticZoom" = "AXGroup"
     "Document"     = "AXTextArea"
-    "Edit"         = "AXTextField"
+    "Edit"         = "AXEdit"
     "Text"         = "AXStaticText"
     "Hyperlink"    = "AXLink"
     "Button"       = "AXButton"

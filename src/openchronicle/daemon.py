@@ -17,6 +17,7 @@ from . import paths
 from .capture import scheduler as capture_scheduler
 from .config import Config
 from .logger import get
+from .session import recovery as session_recovery
 from .session import tick as session_tick
 from .timeline import tick as timeline_tick
 
@@ -51,6 +52,20 @@ async def _mcp_loop(cfg: Config) -> None:
 async def _run(cfg: Config, *, capture_only: bool = False) -> None:
     paths.ensure_dirs()
     paths.pid_file().write_text(str(os.getpid()))
+
+    # Force-end any sessions left in 'active' state by a previous hard
+    # crash (SIGKILL / OOM / power loss). Without this, the daily
+    # safety-net's reduce_all_pending excludes 'active' rows and the
+    # crashed session's work is lost forever. Runs before SessionManager
+    # so any new events from this boot can't race the recovery.
+    try:
+        recovered = session_recovery.recover_orphan_sessions(cfg)
+        if recovered:
+            logger.info("recovered %d orphan session(s) from previous run", recovered)
+    except Exception as exc:  # noqa: BLE001
+        # Recovery failure must not block the daemon — better to have a
+        # running daemon with one un-recovered orphan than no daemon.
+        logger.error("orphan-session recovery failed: %s", exc, exc_info=True)
 
     # SessionManager observes every capture-worthy event and fires the
     # reducer via its on_session_end callback. Built even when

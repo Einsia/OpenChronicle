@@ -41,6 +41,17 @@ def _init() -> config_mod.Config:
     return config_mod.load()
 
 
+def _init_silent() -> config_mod.Config:
+    """Initialize OpenChronicle without writing to stdout.
+
+    stdio MCP servers must keep stdout reserved for JSON-RPC messages.
+    """
+    paths.ensure_dirs()
+    config_mod.write_default_if_missing()
+    logger_mod.setup(console=False)
+    return config_mod.load()
+
+
 def _is_pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
@@ -419,6 +430,15 @@ def mcp() -> None:
     from .mcp import server as mcp_server
 
     mcp_server.run_stdio()
+
+
+@app.command("adb-mcp")
+def adb_mcp() -> None:
+    """Run the Android ADB control MCP server (stdio)."""
+    _init_silent()
+    from .mcp import adb_server
+
+    adb_server.run_stdio()
 
 
 install_app = typer.Typer(help="Register the MCP server with common LLM clients.")

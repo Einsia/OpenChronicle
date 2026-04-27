@@ -112,6 +112,22 @@ def build_server(cfg: Config | None = None, controller: ADBController | None = N
             ensure_ascii=False,
         )
 
+    @server.tool()
+    def adb_pair(host: str, port: int, code: str, device_id: str | None = None) -> str:
+        """Pair adb to a device via wireless debugging (Android 11+)."""
+        return json.dumps(
+            adb.pair(host=host, port=port, code=code, device_id=device_id),
+            ensure_ascii=False,
+        )
+
+    @server.tool()
+    def adb_connect(host: str, port: int, device_id: str | None = None) -> str:
+        """Connect adb to a wireless debugging endpoint."""
+        return json.dumps(
+            adb.connect(host=host, port=port, device_id=device_id),
+            ensure_ascii=False,
+        )
+
     return server
 
 

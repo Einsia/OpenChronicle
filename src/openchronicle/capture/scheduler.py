@@ -476,7 +476,7 @@ def _delete_captures_from_fts(stems: list[str]) -> None:
 def _strip_screenshot_inplace(path: Path) -> bool:
     """Rewrite a capture JSON without its ``screenshot`` field. Returns True if stripped."""
     try:
-        raw = path.read_text(encoding="utf-8")
+        raw = path.read_bytes()
     except OSError:
         return False
     try:

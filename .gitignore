@@ -24,7 +24,24 @@ resources/mac-ax-watcher
 
 # Local OpenChronicle data (only if symlinked into the repo for dev)
 .openchronicle/
+data/rpa/traces/
+data/rpa/skills/
 
 # Ad-hoc logs / scratch
 *.log
 scratch/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyc.*
+*.pyo
+*.pyd
+
+# Local temp files
+.tmp/
+
+# PR review exports
+pr-*-review-export/
+
+.gstack/

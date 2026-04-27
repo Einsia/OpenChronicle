@@ -16,6 +16,7 @@ from .memory import ADBMemoryRecorder
 _PACKAGE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$")
 _ACTIVITY_RE = re.compile(r"^[A-Za-z0-9_.$/]+$")
 _COMPONENT_RE = re.compile(r"(?P<package>[A-Za-z0-9_.$]+)/(?P<activity>[A-Za-z0-9_.$]+)")
+_HOST_RE = re.compile(r"^[A-Za-z0-9.\-]+$")
 
 
 def _parse_devices(output: str) -> list[dict[str, Any]]:
@@ -63,6 +64,20 @@ def _require_non_negative_int(name: str, value: int) -> int:
     if integer > 10000:
         raise safety.ADBSafetyError(f"{name} is implausibly large: {integer}")
     return integer
+
+
+def _require_port(port: int) -> int:
+    value = int(port)
+    if value < 1 or value > 65535:
+        raise safety.ADBSafetyError(f"invalid port: {value}")
+    return value
+
+
+def _require_host(host: str) -> str:
+    value = str(host).strip()
+    if not value or not _HOST_RE.match(value):
+        raise safety.ADBSafetyError(f"invalid host: {host!r}")
+    return value
 
 
 def _bounded_lines(lines: int) -> int:
@@ -213,6 +228,116 @@ class ADBController:
             output_preview=result.stdout_text,
         )
         return {"ok": True, "tool": tool, "count": len(devices), "devices": devices, "memory_entry_id": entry_id}
+
+    def pair(
+        self,
+        host: str,
+        port: int,
+        code: str,
+        *,
+        device_id: str | None = None,
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        """Pair to an Android 11+ device running wireless debugging.
+
+        This uses `adb pair host:port <code>`. It works over any IP transport
+        (typically Wi-Fi; Bluetooth tethering is also possible if it provides IP).
+        """
+        tool = "adb_pair"
+        try:
+            safe_host = _require_host(host)
+            safe_port = _require_port(port)
+            code_text = str(code).strip()
+            if not code_text:
+                raise safety.ADBSafetyError("pairing code must be non-empty")
+            address = f"{safe_host}:{safe_port}"
+            command = ["pair", address, code_text]
+            display = self.client.command_for_display(command, device_id)
+            result = self.client.run(command, device_id=device_id, timeout=timeout)
+        except safety.ADBSafetyError as exc:
+            command = ["pair", f"{host}:{port}", "<redacted>"]
+            display = self.client.command_for_display(command, device_id)
+            return self._blocked_payload(
+                tool_name=tool,
+                device_id=device_id,
+                command=_command_with_redacted_tail(display),
+                params={"host": host, "port": int(port), "device_id": device_id},
+                exc=exc,
+            )
+        except ADBError as exc:
+            return self._adb_error_payload(
+                tool_name=tool,
+                device_id=device_id,
+                command=_command_with_redacted_tail(display),
+                params={"host": safe_host, "port": safe_port, "device_id": device_id},
+                exc=exc,
+            )
+        entry_id = self._record_success(
+            tool_name=tool,
+            device_id=device_id,
+            command=_command_with_redacted_tail(display),
+            summary=f"Paired adb to {address}.",
+            params={"host": safe_host, "port": safe_port, "device_id": device_id},
+            output_preview=result.stdout_text,
+        )
+        return {
+            "ok": True,
+            "tool": tool,
+            "address": address,
+            "memory_entry_id": entry_id,
+            "output": result.stdout_text,
+        }
+
+    def connect(
+        self,
+        host: str,
+        port: int,
+        *,
+        device_id: str | None = None,
+        timeout: float = 20.0,
+    ) -> dict[str, Any]:
+        """Connect adb to an IP endpoint via `adb connect host:port`."""
+        tool = "adb_connect"
+        try:
+            safe_host = _require_host(host)
+            safe_port = _require_port(port)
+            address = f"{safe_host}:{safe_port}"
+            command = ["connect", address]
+            display = self.client.command_for_display(command, device_id)
+            result = self.client.run(command, device_id=device_id, timeout=timeout)
+        except safety.ADBSafetyError as exc:
+            command = ["connect", f"{host}:{port}"]
+            display = self.client.command_for_display(command, device_id)
+            return self._blocked_payload(
+                tool_name=tool,
+                device_id=device_id,
+                command=display,
+                params={"host": host, "port": int(port), "device_id": device_id},
+                exc=exc,
+            )
+        except ADBError as exc:
+            return self._adb_error_payload(
+                tool_name=tool,
+                device_id=device_id,
+                command=display,
+                params={"host": safe_host, "port": safe_port, "device_id": device_id},
+                exc=exc,
+            )
+        entry_id = self._record_success(
+            tool_name=tool,
+            device_id=device_id,
+            command=display,
+            summary=f"Connected adb to {address}.",
+            params={"host": safe_host, "port": safe_port, "device_id": device_id},
+            output_preview=result.stdout_text,
+        )
+        return {
+            "ok": True,
+            "tool": tool,
+            "address": address,
+            "memory_entry_id": entry_id,
+            "output": result.stdout_text,
+        }
 
     def screenshot(self, device_id: str | None = None) -> dict[str, Any]:
         tool = "adb_screenshot"

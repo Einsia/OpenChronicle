@@ -68,6 +68,8 @@ def test_safety_blocks_keyevent_numeric_aliases() -> None:
 def test_safety_allows_mvp_commands() -> None:
     allowed = [
         ["devices", "-l"],
+        ["pair", "127.0.0.1:37123", "000000"],
+        ["connect", "127.0.0.1:5555"],
         ["exec-out", "screencap", "-p"],
         ["shell", "uiautomator", "dump", "/data/local/tmp/window.xml"],
         ["shell", "input", "tap", "100", "200"],
@@ -168,3 +170,26 @@ def test_current_app_uses_bounded_dumpsys_window_command() -> None:
     controller.current_app()
 
     assert client.calls[-1][0] == ["shell", "dumpsys", "window", "windows"]
+
+
+def test_pair_records_redacted_code(ac_root) -> None:
+    client = FakeADBClient(stdout="Successfully paired to 127.0.0.1:37123")
+    controller = ADBController(client=client, recorder=ADBMemoryRecorder())
+
+    result = controller.pair(host="127.0.0.1", port=37123, code="000000")
+
+    assert result["ok"] is True
+    assert client.calls[-1][0][:2] == ["pair", "127.0.0.1:37123"]
+    event_file = next((ac_root / "memory").glob("event-*.md"))
+    parsed = files_mod.read_file(event_file)
+    assert "<redacted>" in parsed.entries[-1].body
+
+
+def test_connect_records_address(ac_root) -> None:
+    client = FakeADBClient(stdout="connected to 127.0.0.1:5555")
+    controller = ADBController(client=client, recorder=ADBMemoryRecorder())
+
+    result = controller.connect(host="127.0.0.1", port=5555)
+
+    assert result["ok"] is True
+    assert client.calls[-1][0] == ["connect", "127.0.0.1:5555"]

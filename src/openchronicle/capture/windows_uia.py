@@ -270,7 +270,7 @@ class WindowsUIAProvider:
         elements: list[dict[str, Any]] = []
         focused = _safe_focused_control(self._auto)
         focused_el = None
-        if _control_identity(focused) != _control_identity(foreground):
+        if focused is not None and _control_identity(focused) != _control_identity(foreground):
             focused_el = _element_from_control(focused, depth=min(self._depth, 3), budget=budget)
         if focused_el is not None:
             elements.append(focused_el)

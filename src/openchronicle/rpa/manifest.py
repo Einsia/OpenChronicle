@@ -76,7 +76,7 @@ class ProviderManifest:
 def load_manifest(path: str | Path) -> ProviderManifest:
     manifest_path = Path(path)
     try:
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        data = json.loads(manifest_path.read_bytes())
     except OSError as exc:
         raise ManifestError(f"cannot read manifest {manifest_path}: {exc}") from exc
     except json.JSONDecodeError as exc:

@@ -17,7 +17,7 @@ SUPPORTED_SCHEMA_VERSION = "1.0"
 def load_workflow(path: str | Path) -> dict[str, Any]:
     workflow_path = Path(path)
     try:
-        data = json.loads(workflow_path.read_text(encoding="utf-8"))
+        data = json.loads(workflow_path.read_bytes())
     except OSError as exc:
         raise WorkflowError(f"cannot read workflow {workflow_path}: {exc}") from exc
     except json.JSONDecodeError as exc:

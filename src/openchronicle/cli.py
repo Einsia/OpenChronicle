@@ -521,7 +521,7 @@ def _load_claude_desktop_config(path: Path) -> dict:
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_bytes())
     except json.JSONDecodeError as exc:
         console.print(
             f"[red]Could not parse {path}:[/red] {exc}\n"
@@ -655,7 +655,7 @@ def _load_opencode_config(path: Path) -> dict:
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_bytes())
     except json.JSONDecodeError as exc:
         console.print(
             f"[red]Could not parse {path}:[/red] {exc}\n"
@@ -1031,7 +1031,7 @@ def rebuild_captures_index() -> None:
     with fts.cursor() as conn:
         for p in files:
             try:
-                data = json.loads(p.read_text(encoding="utf-8"))
+                data = json.loads(p.read_bytes())
             except (OSError, json.JSONDecodeError) as exc:
                 skipped += 1
                 console.print(f"[yellow]skip {p.name}: {exc}[/yellow]")

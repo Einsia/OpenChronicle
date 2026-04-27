@@ -78,7 +78,7 @@ def _matches(
 
 def _load_capture(path: Path) -> dict[str, Any] | None:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_bytes())
     except (OSError, json.JSONDecodeError):
         return None
 

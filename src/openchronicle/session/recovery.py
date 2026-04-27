@@ -92,4 +92,10 @@ def _infer_end_time(
         # cuts are aligned, but be defensive).
         return min(block_end, upper_bound)
 
-    return start_time + _EMPTY_SESSION_FALLBACK
+    # Clamp the fallback to upper_bound for the same disjoint-sessions
+    # invariant: if the next session begins within a minute of this
+    # orphan's start (back-to-back hard crashes), an unclamped 1-min
+    # fallback would push our end_time past the next session's start
+    # and the eventual reducer pass over [start, end) would sweep up
+    # blocks that belong to the next session, double-attributing them.
+    return min(start_time + _EMPTY_SESSION_FALLBACK, upper_bound)

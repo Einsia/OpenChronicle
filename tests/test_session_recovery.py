@@ -155,6 +155,40 @@ def test_recover_is_idempotent(ac_root: Path) -> None:
         assert row.status == "ended"
 
 
+def test_recover_blockless_orphan_clamps_fallback_to_next_session_start(
+    ac_root: Path,
+) -> None:
+    """The 1-min fallback must not overlap with the next session.
+
+    Back-to-back hard crashes can leave two orphans whose start_times
+    are within a minute of each other. If A has no persisted blocks,
+    the unclamped ``start + 1min`` fallback would push A.end_time past
+    B.start, and the eventual reducer pass over [A.start, A.end) would
+    double-attribute B's first block. Clamping the fallback to the
+    upper bound (= B.start) keeps sessions disjoint.
+    """
+    cfg = _cfg(ac_root)
+    a_start = "2026-04-26T09:00:00+08:00"
+    b_start = "2026-04-26T09:00:30+08:00"
+    with fts.cursor() as conn:
+        _insert_active(conn, session_id="sess_a", start=a_start)
+        _insert_active(conn, session_id="sess_b", start=b_start)
+        # No blocks at all — both orphans go through the fallback path.
+
+    assert recovery.recover_orphan_sessions(cfg) == 2
+
+    with fts.cursor() as conn:
+        a = session_store.get_by_id(conn, "sess_a")
+        b = session_store.get_by_id(conn, "sess_b")
+        assert a is not None and b is not None
+        assert a.end_time == _ts(b_start), (
+            "A's fallback end_time must be clamped to B.start, not pushed "
+            "1 minute past it"
+        )
+        # B has no successor so its fallback is the unclamped 1-min default.
+        assert b.end_time == _ts(b_start) + timedelta(minutes=1)
+
+
 def test_recovered_session_visible_to_reduce_all_pending_query(ac_root: Path) -> None:
     """After recovery the row matches the safety-net's catch-up SQL.
 

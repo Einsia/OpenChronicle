@@ -5,9 +5,11 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import platform
 import shutil
 import signal
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +22,8 @@ from . import logger as logger_mod
 from . import paths
 from .store import entries as entries_mod
 from .store import fts, index_md
+
+_IS_WINDOWS = platform.system() == "Windows"
 
 app = typer.Typer(
     add_completion=False,
@@ -39,6 +43,16 @@ def _init() -> config_mod.Config:
 
 
 def _is_pid_alive(pid: int) -> bool:
+    if _IS_WINDOWS:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        kernel32.CloseHandle(handle)
+        return True
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -77,7 +91,39 @@ def start(
         daemon.run(cfg, capture_only=capture_only)
         return
 
-    # Background: double-fork
+    if _IS_WINDOWS:
+        _start_background_windows(capture_only=capture_only)
+    else:
+        _start_background_unix(cfg, capture_only=capture_only)
+
+
+def _start_background_windows(*, capture_only: bool) -> None:
+    """Launch the daemon as a detached subprocess on Windows."""
+    import subprocess
+
+    CREATE_NO_WINDOW = 0x08000000
+    DETACHED_PROCESS = 0x00000008
+    python_exe = sys.executable
+    cmd = [python_exe, "-m", "openchronicle.daemon"]
+    if capture_only:
+        cmd.append("--capture-only")
+
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
+        close_fds=True,
+    )
+    console.print(f"[green]OpenChronicle started in background (pid {proc.pid}).[/green]")
+    console.print(f"Logs: {paths.logs_dir()}")
+
+
+def _start_background_unix(cfg: "config_mod.Config", *, capture_only: bool) -> None:
+    """Launch the daemon via double-fork on Unix/macOS."""
+    from . import daemon
+
     if os.fork() != 0:
         console.print("[green]OpenChronicle started in background.[/green]")
         console.print(f"Logs: {paths.logs_dir()}")
@@ -85,8 +131,6 @@ def start(
     os.setsid()
     if os.fork() != 0:
         os._exit(0)
-    # Redirect stdio to /dev/null. After dup2 the original fd is no longer
-    # needed; closing it avoids leaking one descriptor per daemon start.
     devnull = os.open(os.devnull, os.O_RDWR)
     for fd in (0, 1, 2):
         os.dup2(devnull, fd)
@@ -104,8 +148,34 @@ def stop() -> None:
     if not pid:
         console.print("[yellow]Daemon not running.[/yellow]")
         raise typer.Exit(1)
-    os.kill(pid, signal.SIGTERM)
-    console.print(f"[green]Sent SIGTERM to pid {pid}.[/green]")
+    if _IS_WINDOWS:
+        _stop_windows(pid)
+    else:
+        os.kill(pid, signal.SIGTERM)
+        console.print(f"[green]Sent SIGTERM to pid {pid}.[/green]")
+
+
+def _stop_windows(pid: int) -> None:
+    """Terminate a daemon process on Windows."""
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    PROCESS_TERMINATE = 0x0001
+    handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+    if not handle:
+        console.print(f"[red]Could not open process {pid}.[/red]")
+        raise typer.Exit(1)
+    try:
+        ok = kernel32.TerminateProcess(handle, 1)
+        if ok:
+            console.print(f"[green]Terminated process {pid}.[/green]")
+        else:
+            console.print(f"[red]Failed to terminate process {pid}.[/red]")
+            raise typer.Exit(1)
+    finally:
+        kernel32.CloseHandle(handle)
+    with contextlib.suppress(FileNotFoundError):
+        paths.pid_file().unlink()
 
 
 @app.command()
@@ -255,6 +325,11 @@ def install_claude_code(
 
 
 def _claude_desktop_config_path() -> Path:
+    if _IS_WINDOWS:
+        appdata = os.environ.get("APPDATA", "")
+        if appdata:
+            return Path(appdata) / "Claude" / "claude_desktop_config.json"
+        return Path.home() / "AppData" / "Roaming" / "Claude" / "claude_desktop_config.json"
     return (
         Path.home()
         / "Library"
@@ -282,8 +357,9 @@ def _load_claude_desktop_config(path: Path) -> dict:
 
 
 def _restart_reminder(action: str) -> None:
+    quit_hint = "Ctrl+Q or right-click tray → Quit" if _IS_WINDOWS else "Cmd+Q"
     console.print(
-        f"[yellow]Claude Desktop must be fully quit (Cmd+Q) and reopened to {action}.[/yellow]"
+        f"[yellow]Claude Desktop must be fully quit ({quit_hint}) and reopened to {action}.[/yellow]"
     )
     console.print(
         "[dim]The app only reads claude_desktop_config.json at launch. You won't need to "

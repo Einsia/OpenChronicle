@@ -5,11 +5,40 @@ from __future__ import annotations
 import json
 import os
 from typing import Any
+from urllib.parse import urlparse
 
 from ..config import Config, resolve_api_key
 from ..logger import get
 
 logger = get("openchronicle.writer")
+
+_LOCAL_OLLAMA_NO_PROXY = ("localhost", "127.0.0.1", "::1")
+
+
+def _ensure_local_ollama_proxy_bypass(model: str, api_base: str) -> None:
+    """Ensure local Ollama calls don't get routed through corporate proxies.
+
+    The daemon inherits environment variables only at process start. If the
+    user sets NO_PROXY later, an already-running daemon still lacks it and
+    litellm/httpx can send http://localhost:11434 to HTTP_PROXY, producing
+    proxy HTML like "403 Forbidden: incorrect proxy service was requested".
+    This makes the local-Ollama invariant explicit inside the process.
+    """
+    if not model.startswith("ollama/"):
+        return
+
+    host = urlparse(api_base).hostname if api_base else "localhost"
+    if host not in _LOCAL_OLLAMA_NO_PROXY:
+        return
+
+    for key in ("NO_PROXY", "no_proxy"):
+        existing = os.environ.get(key, "")
+        parts = [p.strip() for p in existing.split(",") if p.strip()]
+        lower_parts = {p.lower() for p in parts}
+        for token in _LOCAL_OLLAMA_NO_PROXY:
+            if token.lower() not in lower_parts:
+                parts.append(token)
+        os.environ[key] = ",".join(parts)
 
 
 def call_llm(
@@ -30,6 +59,7 @@ def call_llm(
     import litellm  # imported lazily to keep CLI startup fast
 
     model_cfg = cfg.model_for(stage)
+    _ensure_local_ollama_proxy_bypass(model_cfg.model, model_cfg.base_url)
     kwargs: dict[str, Any] = {
         "model": model_cfg.model,
         "messages": messages,

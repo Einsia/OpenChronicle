@@ -12,6 +12,7 @@ classifiers = [
     "Environment :: Console",
     "License :: OSI Approved :: MIT License",
     "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -47,6 +48,7 @@ packages = ["src/openchronicle"]
 "resources/build-mac-ax-helper.sh" = "openchronicle/_bundled/build-mac-ax-helper.sh"
 "resources/mac-ax-watcher.swift" = "openchronicle/_bundled/mac-ax-watcher.swift"
 "resources/build-mac-ax-watcher.sh" = "openchronicle/_bundled/build-mac-ax-watcher.sh"
+"resources/win-uia-helper.ps1" = "openchronicle/_bundled/win-uia-helper.ps1"
 
 [dependency-groups]
 dev = [

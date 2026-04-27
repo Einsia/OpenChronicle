@@ -127,6 +127,157 @@ def test_enrich_non_browser_has_no_url() -> None:
     assert capture["url"] is None
 
 
+def test_enrich_extracts_url_on_windows_axedit() -> None:
+    """Windows UIA: bundle_id is a .exe path, address bar role is AXEdit."""
+    capture = {
+        "ax_tree": _ax_tree(
+            {
+                "name": "msedge",
+                "bundle_id": r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                "is_frontmost": True,
+                "windows": [
+                    {
+                        "title": "GitHub - Microsoft Edge",
+                        "focused": True,
+                        "elements": [
+                            {
+                                "role": "AXEdit",
+                                "title": "Address and search bar",
+                                "value": "https://github.com/zhaohb",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    }
+    s1_parser.enrich(capture)
+    assert capture["url"] == "https://github.com/zhaohb"
+
+
+def test_enrich_prefers_named_address_bar_over_page_edit() -> None:
+    """An in-page search input shouldn't beat the real address bar."""
+    capture = {
+        "ax_tree": _ax_tree(
+            {
+                "name": "chrome",
+                "bundle_id": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                "is_frontmost": True,
+                "windows": [
+                    {
+                        "title": "Anthropic",
+                        "focused": True,
+                        "elements": [
+                            {
+                                "role": "AXEdit",
+                                "title": "Search Anthropic",
+                                "value": "claude.ai",
+                            },
+                            {
+                                "role": "AXEdit",
+                                "title": "Address and search bar",
+                                "value": "https://www.anthropic.com/news",
+                            },
+                        ],
+                    }
+                ],
+            }
+        )
+    }
+    s1_parser.enrich(capture)
+    assert capture["url"] == "https://www.anthropic.com/news"
+
+
+def test_enrich_walks_into_children_for_url_bar() -> None:
+    """win-uia-helper nests address bar deep inside the window's tree."""
+    capture = {
+        "ax_tree": _ax_tree(
+            {
+                "name": "msedge",
+                "bundle_id": "msedge.exe",
+                "is_frontmost": True,
+                "windows": [
+                    {
+                        "title": "anywhere",
+                        "focused": True,
+                        "elements": [
+                            {
+                                "role": "AXPane",
+                                "children": [
+                                    {
+                                        "role": "AXToolbar",
+                                        "children": [
+                                            {
+                                                "role": "AXEdit",
+                                                "title": "Address and search bar",
+                                                "value": "anthropic.com",
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    }
+    s1_parser.enrich(capture)
+    assert capture["url"] == "https://anthropic.com"
+
+
+def test_enrich_falls_back_to_trigger_window_title_url() -> None:
+    """When ax_tree is empty, mine the watcher trigger for a URL."""
+    capture = {
+        "ax_tree": {"apps": [{"is_frontmost": True, "name": "", "windows": []}]},
+    }
+    trigger = {
+        "event_type": "UserTextInput",
+        "bundle_id": r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        "window_title": "Open https://example.com/page in Microsoft Edge",
+    }
+    s1_parser.enrich(capture, trigger=trigger)
+    assert capture["url"] == "https://example.com/page"
+
+
+def test_enrich_trigger_fallback_ignored_for_non_browser() -> None:
+    capture = {"ax_tree": {"apps": [{"is_frontmost": True, "windows": []}]}}
+    trigger = {
+        "event_type": "UserTextInput",
+        "bundle_id": r"C:\Windows\System32\notepad.exe",
+        "window_title": "Notes about https://example.com — Notepad",
+    }
+    s1_parser.enrich(capture, trigger=trigger)
+    assert capture["url"] is None
+
+
+def test_enrich_focused_element_value_url_fallback() -> None:
+    """Edge sometimes only exposes the focused address bar, no children."""
+    capture = {
+        "ax_tree": _ax_tree(
+            {
+                "name": "msedge",
+                "bundle_id": "msedge.exe",
+                "is_frontmost": True,
+                "windows": [
+                    {
+                        "title": "Edge",
+                        "focused": True,
+                        "elements": [
+                            {
+                                "role": "AXStaticText",
+                                "value": "Hello https://anthropic.com world",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    }
+    s1_parser.enrich(capture)
+    assert capture["url"] == "https://anthropic.com"
+
+
 def test_enrich_visible_text_truncation() -> None:
     huge_value = "x" * 20_000
     capture = {

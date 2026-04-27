@@ -102,6 +102,17 @@ class EventDispatcher:
             "bundle_id": bundle_id,
             "window_title": window_title,
         }
+        # Windows-only HWND/PID hints — used by the capture scheduler to
+        # anchor the win-uia-helper subprocess to the user's foreground
+        # window. Stripped before being written into the capture JSON
+        # (see scheduler._public_trigger). Mac's watcher doesn't emit
+        # these fields, so the trigger gracefully degrades.
+        hwnd = raw.get("hwnd")
+        if hwnd:
+            trigger["hwnd"] = int(hwnd)
+        pid = raw.get("pid")
+        if pid:
+            trigger["pid"] = int(pid)
 
         if event_type in _IMMEDIATE_EVENTS:
             self._cancel_debounce()

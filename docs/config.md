@@ -1,6 +1,6 @@
 # Configuration
 
-Runtime config lives at `~/.openchronicle/config.toml` (or `$OPENCHRONICLE_ROOT/config.toml`). It's created with sensible defaults the first time you run `openchronicle status`.
+Runtime config lives at `~/.openchronicle/config.toml` on macOS/Linux, `%LOCALAPPDATA%\OpenChronicle\config.toml` on Windows, or `$OPENCHRONICLE_ROOT/config.toml` when overridden. It's created with sensible defaults the first time you run `openchronicle status`.
 
 View the resolved config any time with:
 

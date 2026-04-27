@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import platform
 import queue
 import threading
 import time
@@ -87,7 +88,7 @@ def _write_capture(out: dict[str, Any]) -> Path:
     """Persist a built capture dict to the buffer, index it for search, and log."""
     ts = out["timestamp"]
     path = paths.capture_buffer_dir() / f"{_safe_filename(ts)}.json"
-    path.write_text(json.dumps(out, ensure_ascii=False))
+    path.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
     _index_capture(path.stem, out)
     meta = out.get("window_meta") or {}
     logger.info(
@@ -301,7 +302,7 @@ async def run_forever(
 
     runner = _CaptureRunner(cfg, provider, pre_capture_hook=pre_capture_hook)
     runner.start_worker()
-    watcher: AXWatcherProcess | None = None
+    watcher: Any | None = None
     dispatcher: EventDispatcher | None = None
 
     def _on_capture(trigger: dict[str, Any] | None) -> None:
@@ -310,7 +311,12 @@ async def run_forever(
         runner.run_threaded(trigger)
 
     if cfg.event_driven:
-        watcher = AXWatcherProcess()
+        if platform.system() == "Windows":
+            from .windows_uia import WindowsPollingWatcher
+
+            watcher = WindowsPollingWatcher(interval_seconds=cfg.poll_interval_seconds)
+        else:
+            watcher = AXWatcherProcess()
         if watcher.available:
             dispatcher = EventDispatcher(
                 _on_capture,
@@ -470,7 +476,7 @@ def _delete_captures_from_fts(stems: list[str]) -> None:
 def _strip_screenshot_inplace(path: Path) -> bool:
     """Rewrite a capture JSON without its ``screenshot`` field. Returns True if stripped."""
     try:
-        raw = path.read_text()
+        raw = path.read_bytes()
     except OSError:
         return False
     try:
@@ -482,7 +488,7 @@ def _strip_screenshot_inplace(path: Path) -> bool:
     data.pop("screenshot", None)
     data["screenshot_stripped"] = True
     try:
-        path.write_text(json.dumps(data, ensure_ascii=False))
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         return True
     except OSError:
         return False

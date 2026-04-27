@@ -1,0 +1,1811 @@
+diff -ruN oc_orig/App.tsx oc_work/App.tsx
+--- oc_orig/App.tsx	2026-04-27 19:39:44.000000000 +0000
++++ oc_work/App.tsx	2026-04-27 13:07:36.551357997 +0000
+@@ -2,57 +2,109 @@
+ 
+ import { Sidebar } from "./components/layout/Sidebar";
+ import { Topbar } from "./components/layout/Topbar";
++import { DeviceFleetPage } from "./pages/rpa/DeviceFleetPage";
++import { ExecutorPage } from "./pages/rpa/ExecutorPage";
++import { MemoryCenterPage } from "./pages/rpa/MemoryCenterPage";
++import { OverviewDashboard } from "./pages/rpa/OverviewDashboard";
+ import { ProviderStudio } from "./pages/rpa/ProviderStudio";
+ import { RealtimeConsole } from "./pages/rpa/RealtimeConsole";
++import { SafetyApprovalPage } from "./pages/rpa/SafetyApprovalPage";
++import { SettingsPage } from "./pages/rpa/SettingsPage";
++import { SkillBuilderPage } from "./pages/rpa/SkillBuilderPage";
++import { TraceReplayPage } from "./pages/rpa/TraceReplayPage";
++import { WorkflowLibraryPage } from "./pages/rpa/WorkflowLibraryPage";
+ 
+ const routeByNav: Record<string, string> = {
+-  总览: "/rpa/realtime",
++  总览: "/rpa/overview",
+   实时调试: "/rpa/realtime",
+   "RPA Provider 管理": "/rpa/providers",
+-  设备舰队: "/rpa/providers",
+-  "Workflow 库": "/rpa/providers",
+-  技能构建: "/rpa/providers",
+-  执行器: "/rpa/realtime",
+-  "Trace 回放": "/rpa/realtime",
+-  安全审批: "/rpa/realtime",
+-  记忆中心: "/rpa/providers",
+-  设置: "/rpa/providers"
++  设备舰队: "/rpa/fleet",
++  "Workflow 库": "/rpa/workflows",
++  技能构建: "/rpa/skills",
++  执行器: "/rpa/executor",
++  "Trace 回放": "/rpa/traces",
++  安全审批: "/rpa/safety",
++  记忆中心: "/rpa/memory",
++  设置: "/rpa/settings"
+ };
+ 
++const titleByRoute: Record<string, string> = {
++  "/rpa/overview": "总览 · Global Operations Cockpit",
++  "/rpa/realtime": "实时调试控制台",
++  "/rpa/providers": "RPA Provider 管理与 Workflow Studio",
++  "/rpa/fleet": "设备舰队",
++  "/rpa/workflows": "Workflow 库",
++  "/rpa/skills": "技能构建",
++  "/rpa/executor": "执行器",
++  "/rpa/traces": "Trace 回放",
++  "/rpa/safety": "安全审批",
++  "/rpa/memory": "记忆中心",
++  "/rpa/settings": "设置"
++};
++
++function normalizePath(pathname: string) {
++  if (pathname === "/" || pathname === "/rpa") {
++    return "/rpa/overview";
++  }
++  return Object.values(routeByNav).includes(pathname) ? pathname : "/rpa/overview";
++}
++
+ export function App() {
+-  const [path, setPath] = useState(() => window.location.pathname === "/" ? "/rpa/realtime" : window.location.pathname);
++  const [path, setPath] = useState(() => normalizePath(window.location.pathname));
+   const [activeProvider, setActiveProvider] = useState("android_adb");
+-  const activeNav = path.includes("/rpa/providers") ? "RPA Provider 管理" : "实时调试";
+-  const title = path.includes("/rpa/providers") ? "RPA Provider 管理与 Workflow Studio" : "实时调试控制台";
++  const activeNav = Object.entries(routeByNav).find(([, route]) => route === path)?.[0] ?? "总览";
++  const title = titleByRoute[path] ?? "OpenChronicle RPA Harness";
+ 
+   useEffect(() => {
+-    if (window.location.pathname === "/") {
+-      window.history.replaceState(null, "", "/rpa/realtime");
++    const normalized = normalizePath(window.location.pathname);
++    if (window.location.pathname !== normalized) {
++      window.history.replaceState(null, "", normalized);
+     }
+-    const onPop = () => setPath(window.location.pathname);
++    const onPop = () => setPath(normalizePath(window.location.pathname));
+     window.addEventListener("popstate", onPop);
+     return () => window.removeEventListener("popstate", onPop);
+   }, []);
+ 
+   const page = useMemo(() => {
+-    if (path.includes("/rpa/providers")) {
+-      return <ProviderStudio activeProvider={activeProvider} onProviderChange={setActiveProvider} />;
++    switch (path) {
++      case "/rpa/realtime":
++        return <RealtimeConsole activeProvider={activeProvider} onProviderChange={setActiveProvider} />;
++      case "/rpa/providers":
++        return <ProviderStudio activeProvider={activeProvider} onProviderChange={setActiveProvider} />;
++      case "/rpa/fleet":
++        return <DeviceFleetPage />;
++      case "/rpa/workflows":
++        return <WorkflowLibraryPage />;
++      case "/rpa/skills":
++        return <SkillBuilderPage />;
++      case "/rpa/executor":
++        return <ExecutorPage />;
++      case "/rpa/traces":
++        return <TraceReplayPage />;
++      case "/rpa/safety":
++        return <SafetyApprovalPage />;
++      case "/rpa/memory":
++        return <MemoryCenterPage />;
++      case "/rpa/settings":
++        return <SettingsPage />;
++      case "/rpa/overview":
++      default:
++        return <OverviewDashboard />;
+     }
+-    return <RealtimeConsole activeProvider={activeProvider} onProviderChange={setActiveProvider} />;
+   }, [activeProvider, path]);
+ 
+   function navigate(label: string) {
+-    const nextPath = routeByNav[label] ?? "/rpa/realtime";
++    const nextPath = routeByNav[label] ?? "/rpa/overview";
+     window.history.pushState(null, "", nextPath);
+     setPath(nextPath);
+   }
+ 
+   return (
+-    <div className="min-h-screen bg-slate-50">
++    <div className="h-screen min-h-0 w-full overflow-hidden bg-slate-50">
+       <Sidebar active={activeNav} onNavigate={navigate} />
+-      <div className="ml-[232px]">
++      <div className="flex h-full min-h-0 min-w-0 flex-col pl-[232px]">
+         <Topbar title={title} activeProvider={activeProvider} onProviderChange={setActiveProvider} />
+-        <main className="overflow-x-hidden p-5">{page}</main>
++        <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-5">{page}</main>
+       </div>
+     </div>
+   );
+diff -ruN oc_orig/components/layout/Sidebar.tsx oc_work/components/layout/Sidebar.tsx
+--- oc_orig/components/layout/Sidebar.tsx	2026-04-27 19:24:04.000000000 +0000
++++ oc_work/components/layout/Sidebar.tsx	2026-04-27 12:02:48.375292592 +0000
+@@ -36,17 +36,17 @@
+ 
+ export function Sidebar({ active, onNavigate }: SidebarProps) {
+   return (
+-    <aside className="fixed left-0 top-0 z-20 flex h-screen w-[232px] flex-col border-r border-slate-200 bg-white">
+-      <div className="flex h-[86px] items-center gap-3 border-b border-slate-100 px-6">
+-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lift">
++    <aside className="fixed left-0 top-0 z-20 flex h-screen w-[232px] shrink-0 flex-col overflow-hidden border-r border-slate-200 bg-white">
++      <div className="flex h-[86px] shrink-0 items-center gap-3 border-b border-slate-100 px-6">
++        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lift">
+           <Network className="h-6 w-6" />
+         </div>
+-        <div>
+-          <div className="text-base font-semibold leading-5 text-slate-950">OpenChronicle</div>
+-          <div className="text-base font-semibold leading-5 text-slate-950">Harness</div>
++        <div className="min-w-0">
++          <div className="truncate text-base font-semibold leading-5 text-slate-950">OpenChronicle</div>
++          <div className="truncate text-base font-semibold leading-5 text-slate-950">Harness</div>
+         </div>
+       </div>
+-      <nav className="flex-1 space-y-1 px-3 py-5">
++      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-5">
+         {Object.entries(iconByLabel).map(([label, Icon]) => {
+           const isActive = active === label;
+           return (
+@@ -58,14 +58,14 @@
+               )}
+               onClick={() => onNavigate(label)}
+             >
+-              <Icon className="h-5 w-5" />
+-              <span className="flex-1">{label}</span>
+-              {label === "安全审批" ? <Badge tone="red" className="h-5 px-2">6</Badge> : null}
++              <Icon className="h-5 w-5 shrink-0" />
++              <span className="min-w-0 flex-1 truncate">{label}</span>
++              {label === "安全审批" ? <Badge tone="red" className="h-5 shrink-0 px-2">6</Badge> : null}
+             </button>
+           );
+         })}
+       </nav>
+-      <div className="space-y-2 border-t border-slate-100 p-4 text-xs text-slate-500">
++      <div className="shrink-0 space-y-2 border-t border-slate-100 p-4 text-xs text-slate-500">
+         <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">← 收起侧边栏</div>
+         <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+           <div>企业版 v2.4.1</div>
+diff -ruN oc_orig/components/layout/Topbar.tsx oc_work/components/layout/Topbar.tsx
+--- oc_orig/components/layout/Topbar.tsx	2026-04-27 19:24:04.000000000 +0000
++++ oc_work/components/layout/Topbar.tsx	2026-04-27 12:02:48.434320348 +0000
+@@ -11,31 +11,33 @@
+ 
+ export function Topbar({ title, activeProvider, onProviderChange }: TopbarProps) {
+   return (
+-    <header className="sticky top-0 z-10 flex h-[72px] items-center gap-4 border-b border-slate-200 bg-white/95 px-6 backdrop-blur">
+-      <h1 className="min-w-[240px] text-2xl font-semibold tracking-normal text-slate-950">{title}</h1>
+-      <ProviderSwitcher activeProvider={activeProvider} onProviderChange={onProviderChange} />
+-      <select className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700">
+-        <option>淘宝搜索商品流程</option>
+-        <option>生产环境 (Prod)</option>
+-        <option>Browser 登录回归</option>
+-      </select>
+-      <Badge tone="orange" className="h-10 rounded-xl px-4">L2 中风险</Badge>
+-      <div className="ml-auto flex h-10 w-[280px] items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-400">
+-        <Search className="h-4 w-4" />
+-        <input className="w-full border-0 bg-transparent outline-none" placeholder="搜索设备、流程、动作..." />
+-        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">⌘K</span>
+-      </div>
+-      <button className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600">
+-        <Bell className="h-5 w-5" />
+-        <span className="absolute -right-1 -top-1 rounded-full bg-red-500 px-1.5 text-[10px] font-semibold text-white">12</span>
+-      </button>
+-      <div className="flex items-center gap-2">
+-        <UserCircle className="h-9 w-9 text-slate-700" />
+-        <div className="text-xs">
+-          <div className="font-semibold text-slate-900">张工程师</div>
+-          <div className="text-slate-500">管理员</div>
++    <header className="flex h-[72px] shrink-0 items-center gap-3 overflow-hidden border-b border-slate-200 bg-white/95 px-4 backdrop-blur lg:px-6">
++      <h1 className="w-[clamp(210px,22vw,420px)] shrink-0 truncate text-xl font-semibold tracking-normal text-slate-950 2xl:text-2xl">{title}</h1>
++      <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
++        <ProviderSwitcher activeProvider={activeProvider} onProviderChange={onProviderChange} />
++        <select className="hidden h-10 max-w-[190px] shrink-0 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 xl:block">
++          <option>淘宝搜索商品流程</option>
++          <option>生产环境 (Prod)</option>
++          <option>Browser 登录回归</option>
++        </select>
++        <Badge tone="orange" className="hidden h-10 shrink-0 rounded-xl px-4 xl:inline-flex">L2 中风险</Badge>
++        <div className="ml-auto flex h-10 min-w-[120px] max-w-[280px] flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-400">
++          <Search className="h-4 w-4 shrink-0" />
++          <input className="min-w-0 flex-1 border-0 bg-transparent outline-none" placeholder="搜索设备、流程、动作..." />
++          <span className="hidden shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500 2xl:inline">⌘K</span>
++        </div>
++        <button className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600">
++          <Bell className="h-5 w-5" />
++          <span className="absolute -right-1 -top-1 rounded-full bg-red-500 px-1.5 text-[10px] font-semibold text-white">12</span>
++        </button>
++        <div className="hidden shrink-0 items-center gap-2 xl:flex">
++          <UserCircle className="h-9 w-9 text-slate-700" />
++          <div className="text-xs">
++            <div className="font-semibold text-slate-900">张工程师</div>
++            <div className="text-slate-500">管理员</div>
++          </div>
++          <ChevronDown className="h-4 w-4 text-slate-400" />
+         </div>
+-        <ChevronDown className="h-4 w-4 text-slate-400" />
+       </div>
+     </header>
+   );
+diff -ruN oc_orig/components/rpa/ActionInspector.tsx oc_work/components/rpa/ActionInspector.tsx
+--- oc_orig/components/rpa/ActionInspector.tsx	2026-04-27 19:25:46.000000000 +0000
++++ oc_work/components/rpa/ActionInspector.tsx	2026-04-27 12:03:36.364113878 +0000
+@@ -22,16 +22,16 @@
+ 
+   return (
+     <Card className="h-full">
+-      <CardHeader>
+-        <CardTitle>动作检查器 / Action Inspector</CardTitle>
+-        <div className="flex items-center gap-2 text-xs text-slate-500">
++      <CardHeader className="min-w-0 flex-wrap">
++        <CardTitle className="min-w-0 truncate">动作检查器 / Action Inspector</CardTitle>
++        <div className="flex shrink-0 items-center gap-2 text-xs text-slate-500">
+           <span>{traceStep.stepId}</span>
+           <Button size="sm" onClick={copyJson}><Copy className="h-3.5 w-3.5" />复制 JSON</Button>
+         </div>
+       </CardHeader>
+-      <CardContent className="space-y-4">
+-        <div className="grid grid-cols-[1fr_1.1fr] gap-4">
+-          <div className="overflow-hidden rounded-xl border border-slate-200">
++      <CardContent className="min-w-0 space-y-4">
++        <div className="grid grid-cols-1 gap-4 min-[1720px]:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
++          <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200">
+             {[
+               ["动作类型", String(action.action)],
+               ["Provider", traceStep.provider],
+@@ -45,21 +45,21 @@
+               ["风险等级", risk],
+               ["审批要求", risk === "L2" || risk === "L3" ? "需要审批" : "无需审批"]
+             ].map(([label, value]) => (
+-              <div key={label} className="grid grid-cols-[132px_1fr] border-b border-slate-100 text-xs last:border-b-0">
++              <div key={label} className="grid grid-cols-[120px_minmax(0,1fr)] border-b border-slate-100 text-xs last:border-b-0">
+                 <div className="bg-slate-50 px-3 py-2 text-slate-500">{label}</div>
+-                <div className="px-3 py-2 font-medium text-slate-800">
++                <div className="min-w-0 break-words px-3 py-2 font-medium text-slate-800">
+                   {label === "风险等级" ? <Badge tone={risk === "L3" ? "red" : risk === "L2" ? "orange" : "green"}>{value}</Badge> : value}
+                 </div>
+               </div>
+             ))}
+           </div>
+-          <pre className="max-h-[300px] overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-4 font-mono text-[11px] leading-5 text-blue-900">
++          <pre className="max-h-[300px] min-w-0 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-4 font-mono text-[11px] leading-5 text-blue-900">
+             {formatJson(action)}
+           </pre>
+         </div>
+         <div>
+           <div className="mb-2 text-xs font-semibold text-slate-600">执行截图</div>
+-          <div className="grid grid-cols-[1fr_40px_1fr] items-center gap-3">
++          <div className="grid grid-cols-[minmax(0,1fr)_40px_minmax(0,1fr)] items-center gap-3">
+             <ScreenshotThumb label="执行前截图" />
+             <ArrowRight className="mx-auto h-5 w-5 text-slate-400" />
+             <ScreenshotThumb label="执行后截图" />
+@@ -73,8 +73,8 @@
+ 
+ function ScreenshotThumb({ label }: { label: string }) {
+   return (
+-    <div className="rounded-xl border border-slate-200 bg-white p-2">
+-      <div className="mb-2 text-xs text-slate-500">{label}</div>
++    <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-2">
++      <div className="mb-2 truncate text-xs text-slate-500">{label}</div>
+       <div className="h-20 rounded-lg border border-orange-100 bg-gradient-to-r from-orange-50 to-red-50 p-2">
+         <div className="h-5 rounded-full border border-orange-200 bg-white" />
+         <div className="mt-3 grid grid-cols-4 gap-2">
+diff -ruN oc_orig/components/rpa/BridgeInspector.tsx oc_work/components/rpa/BridgeInspector.tsx
+--- oc_orig/components/rpa/BridgeInspector.tsx	2026-04-27 19:25:46.000000000 +0000
++++ oc_work/components/rpa/BridgeInspector.tsx	2026-04-27 12:05:31.177719579 +0000
+@@ -10,21 +10,21 @@
+ export function BridgeInspector({ nodes }: BridgeInspectorProps) {
+   return (
+     <Card>
+-      <CardHeader className="py-2">
+-        <CardTitle className="text-sm">Bridge Inspector</CardTitle>
++      <CardHeader className="min-w-0 py-2">
++        <CardTitle className="min-w-0 truncate text-sm">Bridge Inspector</CardTitle>
+       </CardHeader>
+-      <CardContent className="flex items-center gap-2 overflow-x-auto py-3">
++      <CardContent className="flex min-w-0 items-center gap-2 overflow-x-auto py-3">
+         {nodes.map((node, index) => (
+-          <div key={node.id} className="flex items-center gap-2">
+-            <div className="min-w-[150px] rounded-xl border border-slate-200 bg-white p-3 text-xs">
++          <div key={node.id} className="flex shrink-0 items-center gap-2">
++            <div className="w-[150px] rounded-xl border border-slate-200 bg-white p-3 text-xs">
+               <div className="flex items-center justify-between gap-2 font-semibold text-slate-800">
+-                {node.label}
+-                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
++                <span className="truncate">{node.label}</span>
++                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+               </div>
+-              <div className="mt-1 text-slate-500">{node.detail}</div>
++              <div className="mt-1 truncate text-slate-500">{node.detail}</div>
+               <div className="mt-1 text-emerald-600">● {node.latencyMs}ms</div>
+             </div>
+-            {index < nodes.length - 1 ? <ArrowRight className="h-4 w-4 text-slate-300" /> : null}
++            {index < nodes.length - 1 ? <ArrowRight className="h-4 w-4 shrink-0 text-slate-300" /> : null}
+           </div>
+         ))}
+       </CardContent>
+diff -ruN oc_orig/components/rpa/BridgeTopology.tsx oc_work/components/rpa/BridgeTopology.tsx
+--- oc_orig/components/rpa/BridgeTopology.tsx	2026-04-27 19:42:10.000000000 +0000
++++ oc_work/components/rpa/BridgeTopology.tsx	2026-04-27 12:05:31.166172432 +0000
+@@ -13,15 +13,15 @@
+ 
+   return (
+     <Card className="h-full">
+-      <CardHeader>
+-        <CardTitle>Bridge Topology / 桥接拓扑</CardTitle>
++      <CardHeader className="min-w-0">
++        <CardTitle className="min-w-0 truncate">Bridge Topology / 桥接拓扑</CardTitle>
+       </CardHeader>
+-      <CardContent className="space-y-4">
++      <CardContent className="min-w-0 space-y-4">
+         <div className="space-y-3">
+           {top.map((node, index) => (
+-            <div key={node.id} className="flex items-center gap-3">
++            <div key={node.id} className="flex min-w-0 items-center gap-3">
+               <TopologyNode node={node} />
+-              {index < top.length - 1 ? <ArrowRight className="h-4 w-4 text-slate-300" /> : null}
++              {index < top.length - 1 ? <ArrowRight className="h-4 w-4 shrink-0 text-slate-300" /> : null}
+             </div>
+           ))}
+         </div>
+@@ -38,15 +38,15 @@
+ 
+ function TopologyNode({ node }: { node: BridgeNode }) {
+   return (
+-    <div className="flex min-h-[64px] flex-1 items-center gap-3 rounded-2xl border border-blue-100 bg-blue-50/35 p-3">
+-      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
++    <div className="flex min-h-[64px] min-w-0 flex-1 items-center gap-3 rounded-2xl border border-blue-100 bg-blue-50/35 p-3">
++      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
+         <CheckCircle2 className="h-5 w-5" />
+       </div>
+       <div className="min-w-0 flex-1">
+         <div className="truncate text-sm font-semibold text-slate-900">{node.label}</div>
+         <div className="truncate text-xs text-slate-500">{node.detail}</div>
+       </div>
+-      <div className="text-xs text-emerald-600">● {node.latencyMs}ms</div>
++      <div className="shrink-0 text-xs text-emerald-600">● {node.latencyMs}ms</div>
+     </div>
+   );
+ }
+diff -ruN oc_orig/components/rpa/DeviceLiveView.tsx oc_work/components/rpa/DeviceLiveView.tsx
+--- oc_orig/components/rpa/DeviceLiveView.tsx	2026-04-27 19:25:46.000000000 +0000
++++ oc_work/components/rpa/DeviceLiveView.tsx	2026-04-27 12:03:41.867618838 +0000
+@@ -19,11 +19,11 @@
+ 
+   return (
+     <Card className="h-full">
+-      <CardHeader>
+-        <CardTitle>设备实时画面 / Device Live View</CardTitle>
++      <CardHeader className="min-w-0">
++        <CardTitle className="min-w-0 truncate">设备实时画面 / Device Live View</CardTitle>
+       </CardHeader>
+-      <CardContent className="space-y-4">
+-        <div className="grid grid-cols-4 gap-2">
++      <CardContent className="min-w-0 space-y-4">
++        <div className="grid grid-cols-2 gap-2 min-[1500px]:grid-cols-4">
+           {providerSwitchers.map((item) => (
+             <button
+               key={item.provider}
+@@ -37,7 +37,7 @@
+             </button>
+           ))}
+         </div>
+-        <div className="grid grid-cols-5 gap-2 text-[11px] text-slate-500">
++        <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-500 min-[1500px]:grid-cols-5">
+           {Object.entries(preview.metadata).slice(0, 5).map(([label, value]) => (
+             <div key={label}>
+               <div>{label}</div>
+@@ -46,7 +46,7 @@
+           ))}
+         </div>
+         <PreviewCanvas preview={preview} />
+-        <div className="grid grid-cols-5 gap-2">
++        <div className="grid grid-cols-2 gap-2 min-[1500px]:grid-cols-5">
+           <Button size="sm" onClick={onCaptureKeyframe}><Camera className="h-4 w-4" />截图</Button>
+           <Button size="sm" onClick={onReadTree}><ListTree className="h-4 w-4" />读取树</Button>
+           <Button size="sm" className="text-blue-700"><MousePointer2 className="h-4 w-4" />点击模式</Button>
+@@ -55,7 +55,7 @@
+         </div>
+         <div>
+           <div className="mb-2 text-xs font-semibold text-slate-600">其他会话（3）</div>
+-          <div className="grid grid-cols-3 gap-2">
++          <div className="grid grid-cols-1 gap-2 min-[1500px]:grid-cols-3">
+             {["Windows 桌面", "Browser 会话", "API Worker"].map((name, index) => (
+               <div key={name} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                 <div className="font-semibold text-slate-800">{name}</div>
+@@ -111,11 +111,11 @@
+             <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+             <span className="ml-2">Report Studio - 月度导出</span>
+           </div>
+-          <div className="grid h-[300px] grid-cols-[140px_1fr]">
++          <div className="grid h-[300px] grid-cols-[120px_minmax(0,1fr)]">
+             <div className="border-r border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">报表 / 任务 / 导出</div>
+             <div className="p-4">
+               <div className="mb-3 h-8 w-48 rounded bg-blue-50" />
+-              <div className="grid grid-cols-4 gap-2">
++              <div className="grid grid-cols-2 gap-2 min-[1500px]:grid-cols-4">
+                 {Array.from({ length: 16 }).map((_, index) => <div key={index} className="h-8 rounded border border-slate-200 bg-white" />)}
+               </div>
+             </div>
+@@ -148,7 +148,7 @@
+   return (
+     <div className="rounded-2xl bg-slate-950 p-4 font-mono text-xs text-slate-100">
+       <div className="mb-3 flex items-center gap-2 text-emerald-300"><Code2 className="h-4 w-4" />POST /api/orders/search</div>
+-      <div className="grid h-[320px] grid-cols-2 gap-3">
++      <div className="grid h-[320px] grid-cols-1 gap-3 min-[1500px]:grid-cols-2">
+         <pre className="overflow-auto rounded-xl bg-slate-900 p-3">{`{
+   "keyword": "连衣裙夏季",
+   "page": 1,
+diff -ruN oc_orig/components/rpa/ProviderDetail.tsx oc_work/components/rpa/ProviderDetail.tsx
+--- oc_orig/components/rpa/ProviderDetail.tsx	2026-04-27 19:27:52.000000000 +0000
++++ oc_work/components/rpa/ProviderDetail.tsx	2026-04-27 12:03:58.802279846 +0000
+@@ -28,27 +28,27 @@
+ 
+   return (
+     <Card className="h-full">
+-      <CardHeader>
+-        <CardTitle>Provider Detail / {provider.name}</CardTitle>
++      <CardHeader className="min-w-0">
++        <CardTitle className="min-w-0 truncate">Provider Detail / {provider.name}</CardTitle>
+         <Badge tone={provider.status === "online" ? "green" : "slate"}>{provider.status === "online" ? "在线" : "预留"}</Badge>
+       </CardHeader>
+-      <CardContent className="space-y-3">
+-        <div className="grid grid-cols-[132px_1fr] gap-y-2 text-xs">
+-          <span className="text-slate-500">Provider Name</span><span className="font-mono text-slate-900">{provider.name}</span>
+-          <span className="text-slate-500">Adapter Path</span><span className="font-mono text-slate-900">{provider.adapterPath}</span>
++      <CardContent className="min-w-0 space-y-3">
++        <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-y-2 text-xs">
++          <span className="text-slate-500">Provider Name</span><span className="min-w-0 break-all font-mono text-slate-900">{provider.name}</span>
++          <span className="text-slate-500">Adapter Path</span><span className="min-w-0 break-all font-mono text-slate-900">{provider.adapterPath}</span>
+           <span className="text-slate-500">安全等级</span><Badge tone={provider.safetyLevel === "high" ? "green" : "orange"}>{provider.safetyLevel}</Badge>
+           <span className="text-slate-500">Observe Modes</span>
+-          <span className="flex flex-wrap gap-1">{provider.observeModes.map((mode) => <Badge key={mode} tone="blue">{mode}</Badge>)}</span>
+-          <span className="text-slate-500">支持动作</span><span>{provider.actions.length ? `${provider.actions.length} (${provider.actions.slice(0, 5).join(", ")}...)` : "-"}</span>
++          <span className="flex min-w-0 flex-wrap gap-1">{provider.observeModes.map((mode) => <Badge key={mode} tone="blue">{mode}</Badge>)}</span>
++          <span className="text-slate-500">支持动作</span><span className="min-w-0 break-words">{provider.actions.length ? `${provider.actions.length} (${provider.actions.slice(0, 5).join(", ")}...)` : "-"}</span>
+           <span className="text-slate-500">当前设备</span><span>3 台在线 / 1 台离线</span>
+           <span className="text-slate-500">Heartbeat</span><span className="text-emerald-600">● {provider.latencyMs || 0}ms 前</span>
+         </div>
+-        <div className="rounded-xl border border-slate-200">
+-          <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2 text-xs font-semibold">
+-            Manifest ({provider.manifestVersion})
+-            <Button size="sm"><Copy className="h-3.5 w-3.5" />复制</Button>
++        <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200">
++          <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 text-xs font-semibold">
++            <span className="min-w-0 truncate">Manifest ({provider.manifestVersion})</span>
++            <Button size="sm" className="shrink-0"><Copy className="h-3.5 w-3.5" />复制</Button>
+           </div>
+-          <pre className="max-h-[250px] overflow-auto bg-slate-50 p-3 font-mono text-[11px] leading-5 text-blue-900">{formatJson(manifest)}</pre>
++          <pre className="max-h-[250px] min-w-0 overflow-auto bg-slate-50 p-3 font-mono text-[11px] leading-5 text-blue-900">{formatJson(manifest)}</pre>
+         </div>
+       </CardContent>
+     </Card>
+diff -ruN oc_orig/components/rpa/ProviderRegistry.tsx oc_work/components/rpa/ProviderRegistry.tsx
+--- oc_orig/components/rpa/ProviderRegistry.tsx	2026-04-27 19:40:52.000000000 +0000
++++ oc_work/components/rpa/ProviderRegistry.tsx	2026-04-27 12:04:15.738192277 +0000
+@@ -15,37 +15,37 @@
+ export function ProviderRegistry({ providers, activeProvider, onSelect, onTest }: ProviderRegistryProps) {
+   return (
+     <Card className="h-full">
+-      <CardHeader>
+-        <CardTitle>Provider Registry</CardTitle>
++      <CardHeader className="min-w-0">
++        <CardTitle className="min-w-0 truncate">Provider Registry</CardTitle>
+       </CardHeader>
+-      <CardContent className="grid grid-cols-2 gap-3 min-[1900px]:grid-cols-3">
++      <CardContent className="grid min-w-0 grid-cols-1 gap-3 min-[1500px]:grid-cols-2 min-[1900px]:grid-cols-3">
+         {providers.map((provider) => (
+           <button
+             key={provider.name}
+-            className={`rounded-2xl border p-3 text-left transition hover:shadow-lift ${
++            className={`min-w-0 rounded-2xl border p-3 text-left transition hover:shadow-lift ${
+               activeProvider === provider.name ? "border-blue-300 bg-blue-50/60" : "border-slate-200 bg-white"
+             }`}
+             onClick={() => onSelect(provider.name)}
+           >
+-            <div className="flex items-center justify-between gap-2">
+-              <div className="font-mono text-sm font-semibold text-slate-900">{provider.name}</div>
++            <div className="flex min-w-0 items-center justify-between gap-2">
++              <div className="min-w-0 truncate font-mono text-sm font-semibold text-slate-900">{provider.name}</div>
+               <Badge tone={provider.status === "online" ? "green" : provider.status === "reserved" ? "slate" : "red"}>
+                 {provider.status === "reserved" ? "预留" : provider.status === "online" ? "在线" : "离线"}
+               </Badge>
+             </div>
+-            <div className="mt-3 grid grid-cols-[58px_1fr] gap-y-1 text-xs text-slate-500">
+-              <span>平台</span><span className="text-slate-800">{provider.platform}</span>
+-              <span>Manifest</span><span className="text-slate-800">{provider.manifestVersion}</span>
+-              <span>支持动作</span><span className="text-slate-800">{provider.actions.length || "-"}</span>
++            <div className="mt-3 grid grid-cols-[58px_minmax(0,1fr)] gap-y-1 text-xs text-slate-500">
++              <span>平台</span><span className="truncate text-slate-800">{provider.platform}</span>
++              <span>Manifest</span><span className="truncate text-slate-800">{provider.manifestVersion}</span>
++              <span>支持动作</span><span className="truncate text-slate-800">{provider.actions.length || "-"}</span>
+               <span>Observe</span><span className="truncate text-slate-800">{provider.observeModes.join("、") || "-"}</span>
+-              <span>成功率</span><span className="text-slate-800">{provider.successRate ? `${provider.successRate}%` : "-"}</span>
++              <span>成功率</span><span className="truncate text-slate-800">{provider.successRate ? `${provider.successRate}%` : "-"}</span>
+             </div>
+             <div className="mt-3 h-1.5 rounded-full bg-slate-100">
+               <div className="h-1.5 rounded-full bg-emerald-500" style={{ width: `${provider.successRate ?? 12}%` }} />
+             </div>
+-            <div className="mt-3 grid grid-cols-[1fr_1fr_32px] gap-2">
+-              <Button size="sm" onClick={(event) => { event.stopPropagation(); onTest(provider.name); }}><TestTube2 className="h-3.5 w-3.5" />测试连接</Button>
+-              <Button size="sm">查看 manifest</Button>
++            <div className="mt-3 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_32px] gap-2">
++              <Button size="sm" className="px-2" onClick={(event) => { event.stopPropagation(); onTest(provider.name); }}><TestTube2 className="h-3.5 w-3.5" />测试</Button>
++              <Button size="sm" className="px-2">Manifest</Button>
+               <Button size="icon"><MoreVertical className="h-4 w-4" /></Button>
+             </div>
+           </button>
+diff -ruN oc_orig/components/rpa/ProviderSwitcher.tsx oc_work/components/rpa/ProviderSwitcher.tsx
+--- oc_orig/components/rpa/ProviderSwitcher.tsx	2026-04-27 19:24:04.000000000 +0000
++++ oc_work/components/rpa/ProviderSwitcher.tsx	2026-04-27 12:02:48.465230249 +0000
+@@ -12,7 +12,7 @@
+ 
+ export function ProviderSwitcher({ activeProvider, onProviderChange }: ProviderSwitcherProps) {
+   return (
+-    <div className="flex h-10 rounded-xl border border-slate-200 bg-white p-1">
++    <div className="flex h-10 w-[184px] shrink-0 rounded-xl border border-slate-200 bg-white p-1 2xl:w-[536px]">
+       {providerSwitchers.map((item, index) => {
+         const Icon = icons[index];
+         const active = activeProvider === item.provider;
+@@ -20,13 +20,14 @@
+           <button
+             key={item.provider}
+             className={cn(
+-              "flex min-w-[132px] items-center justify-center gap-2 rounded-lg px-3 text-xs font-medium transition",
++              "flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg px-2 text-xs font-medium transition 2xl:px-3",
+               active ? "bg-blue-50 text-blue-700 ring-1 ring-blue-200" : "text-slate-600 hover:bg-slate-50"
+             )}
+             onClick={() => onProviderChange(item.provider)}
++            title={item.label}
+           >
+-            <Icon className="h-4 w-4" />
+-            {item.label}
++            <Icon className="h-4 w-4 shrink-0" />
++            <span className="hidden truncate 2xl:inline">{item.label}</span>
+           </button>
+         );
+       })}
+diff -ruN oc_orig/components/rpa/RecordingEditStudio.tsx oc_work/components/rpa/RecordingEditStudio.tsx
+--- oc_orig/components/rpa/RecordingEditStudio.tsx	2026-04-27 19:28:52.000000000 +0000
++++ oc_work/components/rpa/RecordingEditStudio.tsx	2026-04-27 12:05:20.894937690 +0000
+@@ -51,15 +51,15 @@
+ 
+   return (
+     <Card className="h-full">
+-      <CardHeader>
+-        <CardTitle>录制与编辑 Studio</CardTitle>
+-        <select className="h-8 rounded-lg border border-slate-200 px-2 text-xs" defaultValue={workflow.name}>
++      <CardHeader className="min-w-0 flex-wrap">
++        <CardTitle className="min-w-0 truncate">录制与编辑 Studio</CardTitle>
++        <select className="h-8 max-w-full rounded-lg border border-slate-200 px-2 text-xs" defaultValue={workflow.name}>
+           <option>{workflow.name}</option>
+           <option>browser_login_flow</option>
+         </select>
+       </CardHeader>
+-      <CardContent className="grid grid-cols-[1fr_220px] gap-4">
+-        <div>
++      <CardContent className="grid min-w-0 grid-cols-1 gap-4 min-[1500px]:grid-cols-[minmax(0,1fr)_220px]">
++        <div className="min-w-0">
+           <div className="mb-3 flex flex-wrap gap-2">
+             <Button size="sm" variant="danger"><span className="h-2 w-2 rounded-full bg-red-500" />开始录制</Button>
+             <Button size="sm" onClick={insertStep}><Plus className="h-3.5 w-3.5" />插入步骤</Button>
+@@ -69,21 +69,21 @@
+             <Button size="sm" variant="primary" onClick={() => void onSave(steps)}><Save className="h-3.5 w-3.5" />保存 Workflow</Button>
+           </div>
+           {showJson ? (
+-            <pre className="h-[302px] overflow-auto rounded-xl bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100">{formatJson(workflowJson)}</pre>
++            <pre className="h-[302px] min-w-0 overflow-auto rounded-xl bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100">{formatJson(workflowJson)}</pre>
+           ) : (
+-            <div className="space-y-2">
++            <div className="min-w-0 space-y-2">
+               {steps.map((step) => (
+                 <button
+                   key={step.id}
+-                  className={`grid w-full grid-cols-[34px_1fr_120px_88px] items-center gap-2 rounded-xl border p-2 text-left text-xs transition ${
++                  className={`grid w-full min-w-0 grid-cols-[34px_minmax(0,1fr)_96px_68px] items-center gap-2 rounded-xl border p-2 text-left text-xs transition ${
+                     selectedStepId === step.id ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                   }`}
+                   onClick={() => setSelectedStepId(step.id)}
+                 >
+                   <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 font-semibold">{step.id}</span>
+-                  <span>
+-                    <span className="block font-mono font-semibold text-slate-900">{step.action}</span>
+-                    <span className="text-slate-500">{step.description}</span>
++                  <span className="min-w-0">
++                    <span className="block truncate font-mono font-semibold text-slate-900">{step.action}</span>
++                    <span className="block truncate text-slate-500">{step.description}</span>
+                   </span>
+                   <Badge tone={step.provider === "system" ? "slate" : "green"}>{step.provider}</Badge>
+                   <span className="flex gap-1">
+@@ -103,7 +103,7 @@
+           </ul>
+           <div className="mt-4 rounded-xl bg-white p-3 text-xs">
+             <div className="font-semibold text-slate-900">当前 Step</div>
+-            <div className="mt-2 font-mono text-blue-700">{selectedStep?.action}</div>
++            <div className="mt-2 truncate font-mono text-blue-700">{selectedStep?.action}</div>
+             <div className="mt-1 text-slate-500">{selectedStep?.description}</div>
+             <div className="mt-3 flex gap-2">
+               <Button size="sm" onClick={editStep}>编辑</Button>
+diff -ruN oc_orig/components/rpa/RecordingFlow.tsx oc_work/components/rpa/RecordingFlow.tsx
+--- oc_orig/components/rpa/RecordingFlow.tsx	2026-04-27 19:25:46.000000000 +0000
++++ oc_work/components/rpa/RecordingFlow.tsx	2026-04-27 12:03:46.727035382 +0000
+@@ -13,11 +13,11 @@
+ export function RecordingFlow({ steps }: RecordingFlowProps) {
+   return (
+     <Card className="h-full">
+-      <CardHeader>
+-        <CardTitle>录制工作流 / Recording Flow</CardTitle>
++      <CardHeader className="min-w-0">
++        <CardTitle className="min-w-0 truncate">录制工作流 / Recording Flow</CardTitle>
+       </CardHeader>
+-      <CardContent>
+-        <div className="grid grid-cols-[1fr_180px] gap-4">
++      <CardContent className="min-w-0">
++        <div className="grid grid-cols-1 gap-4 min-[1500px]:grid-cols-[minmax(0,1fr)_180px]">
+           <div className="space-y-2">
+             {steps.map((step, index) => (
+               <div
+@@ -32,8 +32,8 @@
+               >
+                 {index < steps.length - 1 ? <span className="absolute left-[22px] top-9 h-7 w-px bg-slate-200" /> : null}
+                 <span className="absolute left-4 top-3.5">{iconFor(step.status)}</span>
+-                <div className="flex items-center justify-between gap-2">
+-                  <div className="text-sm font-semibold text-slate-900">{step.label}</div>
++                <div className="flex min-w-0 items-center justify-between gap-2">
++                  <div className="min-w-0 truncate text-sm font-semibold text-slate-900">{step.label}</div>
+                   <Badge tone={step.status === "done" ? "green" : step.status === "current" ? "blue" : step.status === "failed" ? "red" : "slate"}>{step.id}</Badge>
+                 </div>
+                 <div className="mt-1 text-xs text-slate-500">{step.description}</div>
+diff -ruN oc_orig/components/rpa/SafetyApprovalPanel.tsx oc_work/components/rpa/SafetyApprovalPanel.tsx
+--- oc_orig/components/rpa/SafetyApprovalPanel.tsx	2026-04-27 19:26:50.000000000 +0000
++++ oc_work/components/rpa/SafetyApprovalPanel.tsx	2026-04-27 12:04:38.715923939 +0000
+@@ -11,42 +11,44 @@
+ export function SafetyApprovalPanel({ approvals, onDecision }: SafetyApprovalPanelProps) {
+   return (
+     <Card>
+-      <CardHeader>
+-        <CardTitle>安全审批（6）</CardTitle>
+-        <button className="text-xs font-medium text-blue-600">查看全部 ›</button>
++      <CardHeader className="min-w-0">
++        <CardTitle className="min-w-0 truncate">安全审批（6）</CardTitle>
++        <button className="shrink-0 text-xs font-medium text-blue-600">查看全部 ›</button>
+       </CardHeader>
+-      <CardContent className="pt-0">
+-        <table className="w-full text-left text-xs">
+-          <thead className="text-slate-500">
+-            <tr className="border-b border-slate-100">
+-              <th className="py-2 font-medium">动作</th>
+-              <th className="font-medium">风险等级</th>
+-              <th className="font-medium">发现时间</th>
+-              <th className="font-medium">状态 / 操作</th>
+-            </tr>
+-          </thead>
+-          <tbody>
+-            {approvals.map((approval) => (
+-              <tr key={approval.id} className="border-b border-slate-50 last:border-0">
+-                <td className="py-2 font-medium text-slate-800">{approval.action}</td>
+-                <td>
+-                  <Badge tone={approval.riskLevel === "L3" ? "red" : approval.riskLevel === "L2" ? "orange" : "green"}>{approval.riskLevel} 风险</Badge>
+-                </td>
+-                <td className="text-slate-500">{approval.createdAt}</td>
+-                <td>
+-                  {approval.status === "pending" ? (
+-                    <div className="flex gap-1">
+-                      <Button size="sm" variant="success" onClick={() => onDecision(approval, "approved")}>批准</Button>
+-                      <Button size="sm" variant="danger" onClick={() => onDecision(approval, "rejected")}>拒绝</Button>
+-                    </div>
+-                  ) : (
+-                    <Badge tone={approval.status === "approved" ? "green" : "red"}>{approval.status === "approved" ? "已批准" : "已拒绝"}</Badge>
+-                  )}
+-                </td>
++      <CardContent className="min-w-0 pt-0">
++        <div className="overflow-x-auto">
++          <table className="min-w-[560px] w-full text-left text-xs">
++            <thead className="text-slate-500">
++              <tr className="border-b border-slate-100">
++                <th className="py-2 font-medium">动作</th>
++                <th className="font-medium">风险等级</th>
++                <th className="font-medium">发现时间</th>
++                <th className="font-medium">状态 / 操作</th>
+               </tr>
+-            ))}
+-          </tbody>
+-        </table>
++            </thead>
++            <tbody>
++              {approvals.map((approval) => (
++                <tr key={approval.id} className="border-b border-slate-50 last:border-0">
++                  <td className="py-2 font-medium text-slate-800">{approval.action}</td>
++                  <td>
++                    <Badge tone={approval.riskLevel === "L3" ? "red" : approval.riskLevel === "L2" ? "orange" : "green"}>{approval.riskLevel} 风险</Badge>
++                  </td>
++                  <td className="text-slate-500">{approval.createdAt}</td>
++                  <td>
++                    {approval.status === "pending" ? (
++                      <div className="flex gap-1">
++                        <Button size="sm" variant="success" onClick={() => onDecision(approval, "approved")}>批准</Button>
++                        <Button size="sm" variant="danger" onClick={() => onDecision(approval, "rejected")}>拒绝</Button>
++                      </div>
++                    ) : (
++                      <Badge tone={approval.status === "approved" ? "green" : "red"}>{approval.status === "approved" ? "已批准" : "已拒绝"}</Badge>
++                    )}
++                  </td>
++                </tr>
++              ))}
++            </tbody>
++          </table>
++        </div>
+       </CardContent>
+     </Card>
+   );
+diff -ruN oc_orig/components/rpa/SkillOutputVersion.tsx oc_work/components/rpa/SkillOutputVersion.tsx
+--- oc_orig/components/rpa/SkillOutputVersion.tsx	2026-04-27 19:28:52.000000000 +0000
++++ oc_work/components/rpa/SkillOutputVersion.tsx	2026-04-27 12:05:06.722967918 +0000
+@@ -35,9 +35,9 @@
+ 
+   return (
+     <Card className="h-full">
+-      <CardHeader>
+-        <CardTitle>Skill 输出与版本</CardTitle>
+-        <div className="rounded-xl border border-slate-200 p-1">
++      <CardHeader className="min-w-0">
++        <CardTitle className="min-w-0 truncate">Skill 输出与版本</CardTitle>
++        <div className="shrink-0 rounded-xl border border-slate-200 p-1">
+           {(["YAML", "JSON"] as const).map((item) => (
+             <button
+               key={item}
+@@ -49,8 +49,8 @@
+           ))}
+         </div>
+       </CardHeader>
+-      <CardContent className="grid grid-cols-[0.95fr_1.05fr] gap-4">
+-        <div className="space-y-3">
++      <CardContent className="grid min-w-0 grid-cols-1 gap-4 min-[1500px]:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
++        <div className="min-w-0 space-y-3">
+           {[
+             ["Skill 名称", "taobao_search_product"],
+             ["描述", "使用 Taobao 搜索商品并生成结果"],
+@@ -58,38 +58,38 @@
+             ["Provider", "android_adb"],
+             ["最新版本", "v1.2.0"]
+           ].map(([label, value]) => (
+-            <label key={label} className="grid grid-cols-[92px_1fr] items-center gap-2 text-xs text-slate-500">
++            <label key={label} className="grid grid-cols-[92px_minmax(0,1fr)] items-center gap-2 text-xs text-slate-500">
+               {label}
+-              <input className="h-8 rounded-lg border border-slate-200 px-2 text-slate-800" defaultValue={value} />
++              <input className="h-8 min-w-0 rounded-lg border border-slate-200 px-2 text-slate-800" defaultValue={value} />
+             </label>
+           ))}
+-          <pre className="max-h-36 overflow-auto rounded-xl bg-slate-950 p-3 font-mono text-[11px] leading-5 text-slate-100">{preview}</pre>
++          <pre className="max-h-36 min-w-0 overflow-auto rounded-xl bg-slate-950 p-3 font-mono text-[11px] leading-5 text-slate-100">{preview}</pre>
+         </div>
+-        <div>
+-          <div className="mb-2 flex items-center justify-between text-xs font-semibold text-slate-700">
++        <div className="min-w-0">
++          <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold text-slate-700">
+             版本历史
+-            <button className="text-blue-600">查看全部</button>
++            <button className="shrink-0 text-blue-600">查看全部</button>
+           </div>
+           <div className="space-y-2">
+             {["v1.2.0", "v1.1.0", "v1.0.0", "v0.9.0"].map((version, index) => (
+-              <div key={version} className="grid grid-cols-[70px_70px_1fr] rounded-xl border border-slate-200 px-3 py-2 text-xs">
++              <div key={version} className="grid grid-cols-[64px_70px_minmax(0,1fr)] rounded-xl border border-slate-200 px-3 py-2 text-xs">
+                 <span className="font-semibold">{version}</span>
+                 <Badge tone={index === 3 ? "slate" : "green"}>{index === 3 ? "草稿" : "已发布"}</Badge>
+-                <span className="text-right text-slate-500">2024-05-{16 - index}</span>
++                <span className="truncate text-right text-slate-500">2024-05-{16 - index}</span>
+               </div>
+             ))}
+           </div>
+           <div className="mt-4 text-xs font-semibold text-slate-700">最近生成的 Skill</div>
+-          <div className="mt-2 grid grid-cols-3 gap-2">
++          <div className="mt-2 grid grid-cols-1 gap-2 min-[1500px]:grid-cols-3">
+             {skills.map((skill) => (
+-              <div key={`${skill.name}-${skill.version}`} className="rounded-xl border border-slate-200 p-3 text-xs">
++              <div key={`${skill.name}-${skill.version}`} className="min-w-0 rounded-xl border border-slate-200 p-3 text-xs">
+                 <div className="truncate font-mono font-semibold text-slate-900">{skill.name}</div>
+                 <div className="mt-1 text-slate-500">{skill.version}</div>
+-                <div className="mt-2 text-blue-600">{skill.provider}</div>
++                <div className="mt-2 truncate text-blue-600">{skill.provider}</div>
+               </div>
+             ))}
+           </div>
+-          <div className="mt-4 grid grid-cols-2 gap-2">
++          <div className="mt-4 grid grid-cols-1 gap-2 min-[1500px]:grid-cols-2">
+             <Button variant="primary">发布 Skill</Button>
+             <Button>导出 JSON</Button>
+           </div>
+diff -ruN oc_orig/components/rpa/TimelineLog.tsx oc_work/components/rpa/TimelineLog.tsx
+--- oc_orig/components/rpa/TimelineLog.tsx	2026-04-27 19:26:50.000000000 +0000
++++ oc_work/components/rpa/TimelineLog.tsx	2026-04-27 12:04:26.170708728 +0000
+@@ -28,53 +28,55 @@
+ 
+   return (
+     <Card>
+-      <CardHeader>
+-        <CardTitle>时间线与日志（32 步）</CardTitle>
+-        <div className="flex items-center gap-2">
++      <CardHeader className="min-w-0 flex-wrap">
++        <CardTitle className="min-w-0 truncate">时间线与日志（32 步）</CardTitle>
++        <div className="flex min-w-0 flex-wrap items-center gap-2">
+           <select className="h-8 rounded-lg border border-slate-200 px-2 text-xs" value={provider} onChange={(event) => setProvider(event.target.value)}>
+             <option value="all">全部 Provider</option>
+             <option value="android_adb">android_adb</option>
+             <option value="windows_uia">windows_uia</option>
+             <option value="api_worker">api_worker</option>
+           </select>
+-          <div className="flex h-8 items-center gap-2 rounded-lg border border-slate-200 px-2 text-xs text-slate-400">
+-            <Search className="h-3.5 w-3.5" />
+-            <input className="w-40 outline-none" placeholder="筛选动作、元素、结果..." value={query} onChange={(event) => setQuery(event.target.value)} />
++          <div className="flex h-8 min-w-[160px] flex-1 items-center gap-2 rounded-lg border border-slate-200 px-2 text-xs text-slate-400">
++            <Search className="h-3.5 w-3.5 shrink-0" />
++            <input className="min-w-0 flex-1 outline-none" placeholder="筛选动作、元素、结果..." value={query} onChange={(event) => setQuery(event.target.value)} />
+           </div>
+           <Button size="sm"><Download className="h-3.5 w-3.5" />导出</Button>
+         </div>
+       </CardHeader>
+-      <CardContent className="pt-0">
+-        <table className="w-full text-left text-xs">
+-          <thead className="text-slate-500">
+-            <tr className="border-b border-slate-100">
+-              {["步骤", "时间", "Provider", "动作", "页面状态 / 元素", "结果", "耗时"].map((head) => (
+-                <th key={head} className="py-2 font-medium">{head}</th>
+-              ))}
+-            </tr>
+-          </thead>
+-          <tbody>
+-            {filtered.map((row) => {
+-              const active = selectedStepId === row.stepId;
+-              const result = String(row.result.status);
+-              return (
+-                <tr
+-                  key={`${row.stepId}-${row.provider}`}
+-                  className={cn("cursor-pointer border-b border-slate-50 last:border-0", active ? "bg-blue-50 text-blue-700" : "hover:bg-slate-50")}
+-                  onClick={() => onSelect(row)}
+-                >
+-                  <td className="py-2 font-semibold">▶ {row.stepId}</td>
+-                  <td>{row.timestamp}</td>
+-                  <td>{row.provider}</td>
+-                  <td>{row.actionName}</td>
+-                  <td>{row.pageState}</td>
+-                  <td><Badge tone={result === "success" ? "green" : result === "failed" ? "red" : "orange"}>{result}</Badge></td>
+-                  <td>{row.duration}</td>
+-                </tr>
+-              );
+-            })}
+-          </tbody>
+-        </table>
++      <CardContent className="min-w-0 pt-0">
++        <div className="overflow-x-auto">
++          <table className="min-w-[760px] w-full text-left text-xs">
++            <thead className="text-slate-500">
++              <tr className="border-b border-slate-100">
++                {["步骤", "时间", "Provider", "动作", "页面状态 / 元素", "结果", "耗时"].map((head) => (
++                  <th key={head} className="py-2 font-medium">{head}</th>
++                ))}
++              </tr>
++            </thead>
++            <tbody>
++              {filtered.map((row) => {
++                const active = selectedStepId === row.stepId;
++                const result = String(row.result.status);
++                return (
++                  <tr
++                    key={`${row.stepId}-${row.provider}`}
++                    className={cn("cursor-pointer border-b border-slate-50 last:border-0", active ? "bg-blue-50 text-blue-700" : "hover:bg-slate-50")}
++                    onClick={() => onSelect(row)}
++                  >
++                    <td className="py-2 font-semibold">▶ {row.stepId}</td>
++                    <td>{row.timestamp}</td>
++                    <td>{row.provider}</td>
++                    <td>{row.actionName}</td>
++                    <td>{row.pageState}</td>
++                    <td><Badge tone={result === "success" ? "green" : result === "failed" ? "red" : "orange"}>{result}</Badge></td>
++                    <td>{row.duration}</td>
++                  </tr>
++                );
++              })}
++            </tbody>
++          </table>
++        </div>
+         <div className="mt-3 flex justify-center gap-1 text-xs">
+           {[1, 2, 3, 4].map((page) => (
+             <button key={page} className={cn("h-7 w-7 rounded-lg border", page === 1 ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-500")}>{page}</button>
+diff -ruN oc_orig/components/rpa/WorkflowLibrary.tsx oc_work/components/rpa/WorkflowLibrary.tsx
+--- oc_orig/components/rpa/WorkflowLibrary.tsx	2026-04-27 19:27:52.000000000 +0000
++++ oc_work/components/rpa/WorkflowLibrary.tsx	2026-04-27 12:04:38.727338438 +0000
+@@ -10,42 +10,44 @@
+ export function WorkflowLibrary({ workflows }: WorkflowLibraryProps) {
+   return (
+     <Card>
+-      <CardHeader>
+-        <CardTitle>Workflow 库</CardTitle>
+-        <div className="flex gap-2">
+-          <input className="h-8 rounded-lg border border-slate-200 px-3 text-xs" placeholder="搜索 workflow..." />
++      <CardHeader className="min-w-0 flex-wrap">
++        <CardTitle className="min-w-0 truncate">Workflow 库</CardTitle>
++        <div className="flex min-w-0 flex-wrap gap-2">
++          <input className="h-8 min-w-[150px] flex-1 rounded-lg border border-slate-200 px-3 text-xs" placeholder="搜索 workflow..." />
+           <select className="h-8 rounded-lg border border-slate-200 px-2 text-xs"><option>全部 Provider</option></select>
+         </div>
+       </CardHeader>
+-      <CardContent className="pt-0">
+-        <table className="w-full text-left text-xs">
+-          <thead className="text-slate-500">
+-            <tr className="border-b border-slate-100">
+-              {["名称", "schema_version", "provider", "platform", "steps", "success rate", "last run", "操作"].map((head) => (
+-                <th key={head} className="py-2 font-medium">{head}</th>
+-              ))}
+-            </tr>
+-          </thead>
+-          <tbody>
+-            {workflows.map((workflow) => (
+-              <tr key={workflow.id} className="border-b border-slate-50 last:border-0">
+-                <td className="py-2 font-medium text-blue-700">{workflow.name}</td>
+-                <td><Badge tone="slate">{workflow.schemaVersion}</Badge></td>
+-                <td>{workflow.provider}</td>
+-                <td>{workflow.platform}</td>
+-                <td>{workflow.steps.length}</td>
+-                <td className="text-emerald-600">{workflow.successRate}%</td>
+-                <td>{workflow.lastRun}</td>
+-                <td className="flex gap-1 py-1">
+-                  <Button size="sm">验证</Button>
+-                  <Button size="sm">运行</Button>
+-                  <Button size="sm">编辑 JSON</Button>
+-                  <Button size="sm">生成 Skill</Button>
+-                </td>
++      <CardContent className="min-w-0 pt-0">
++        <div className="overflow-x-auto">
++          <table className="min-w-[860px] w-full text-left text-xs">
++            <thead className="text-slate-500">
++              <tr className="border-b border-slate-100">
++                {["名称", "schema_version", "provider", "platform", "steps", "success rate", "last run", "操作"].map((head) => (
++                  <th key={head} className="py-2 font-medium">{head}</th>
++                ))}
+               </tr>
+-            ))}
+-          </tbody>
+-        </table>
++            </thead>
++            <tbody>
++              {workflows.map((workflow) => (
++                <tr key={workflow.id} className="border-b border-slate-50 last:border-0">
++                  <td className="py-2 font-medium text-blue-700">{workflow.name}</td>
++                  <td><Badge tone="slate">{workflow.schemaVersion}</Badge></td>
++                  <td>{workflow.provider}</td>
++                  <td>{workflow.platform}</td>
++                  <td>{workflow.steps.length}</td>
++                  <td className="text-emerald-600">{workflow.successRate}%</td>
++                  <td>{workflow.lastRun}</td>
++                  <td className="flex gap-1 py-1">
++                    <Button size="sm">验证</Button>
++                    <Button size="sm">运行</Button>
++                    <Button size="sm">编辑 JSON</Button>
++                    <Button size="sm">生成 Skill</Button>
++                  </td>
++                </tr>
++              ))}
++            </tbody>
++          </table>
++        </div>
+       </CardContent>
+     </Card>
+   );
+diff -ruN oc_orig/components/rpa/WorkflowSkillBuilder.tsx oc_work/components/rpa/WorkflowSkillBuilder.tsx
+--- oc_orig/components/rpa/WorkflowSkillBuilder.tsx	2026-04-27 19:26:50.000000000 +0000
++++ oc_work/components/rpa/WorkflowSkillBuilder.tsx	2026-04-27 12:04:55.375034796 +0000
+@@ -40,16 +40,16 @@
+ 
+   return (
+     <Card>
+-      <CardHeader>
+-        <CardTitle>Workflow / Skill Builder</CardTitle>
+-        <div className="flex items-center gap-2 text-xs">
++      <CardHeader className="min-w-0 flex-wrap">
++        <CardTitle className="min-w-0 truncate">Workflow / Skill Builder</CardTitle>
++        <div className="flex shrink-0 items-center gap-2 text-xs">
+           <span>输出</span>
+           <button className={format === "workflow.json" ? "text-blue-700" : "text-slate-500"} onClick={() => setFormat("workflow.json")}>workflow.json</button>
+           <button className={format === "skill.yaml" ? "text-blue-700" : "text-slate-500"} onClick={() => setFormat("skill.yaml")}>skill.yaml</button>
+         </div>
+       </CardHeader>
+-      <CardContent className="grid grid-cols-[1.05fr_0.95fr] gap-4">
+-        <div className="space-y-3">
++      <CardContent className="grid min-w-0 grid-cols-1 gap-4 min-[1500px]:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
++        <div className="min-w-0 space-y-3">
+           <label className="block text-xs font-medium text-slate-600">
+             技能名称
+             <input className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm" defaultValue="taobao_search_product" />
+@@ -58,24 +58,24 @@
+             技能描述
+             <textarea className="mt-1 h-16 w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm" defaultValue="在淘宝 App 中搜索商品的通用技能" />
+           </label>
+-          <div className="rounded-xl border border-slate-200">
++          <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200">
+             {["keyword", "category", "page"].map((param, index) => (
+-              <div key={param} className="grid grid-cols-4 border-b border-slate-100 px-3 py-2 text-xs last:border-0">
+-                <span className="font-medium">{param}</span>
++              <div key={param} className="grid grid-cols-[minmax(0,1fr)_64px_56px_minmax(0,1fr)] border-b border-slate-100 px-3 py-2 text-xs last:border-0">
++                <span className="truncate font-medium">{param}</span>
+                 <span>string</span>
+                 <span>{index !== 1 ? "必填" : "可选"}</span>
+-                <span className="text-slate-500">{index === 0 ? "搜索关键词" : index === 1 ? "商品分类" : "页码"}</span>
++                <span className="truncate text-slate-500">{index === 0 ? "搜索关键词" : index === 1 ? "商品分类" : "页码"}</span>
+               </div>
+             ))}
+           </div>
+-          <div className="flex gap-2">
+-            <Button className="flex-1"><FileJson className="h-4 w-4" />预览 {format}</Button>
+-            <Button className="flex-1" variant="primary" onClick={handleGenerate}><Wand2 className="h-4 w-4" />生成 Skill</Button>
++          <div className="flex flex-wrap gap-2">
++            <Button className="min-w-[150px] flex-1"><FileJson className="h-4 w-4" />预览 {format}</Button>
++            <Button className="min-w-[150px] flex-1" variant="primary" onClick={handleGenerate}><Wand2 className="h-4 w-4" />生成 Skill</Button>
+           </div>
+           {lastSkill ? <div className="rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700">已生成 {lastSkill.name} {lastSkill.version} ({lastSkill.format})</div> : null}
+         </div>
+-        <div>
+-          <pre className="h-full min-h-[230px] overflow-auto rounded-xl bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100">{preview}</pre>
++        <div className="min-w-0">
++          <pre className="h-full min-h-[230px] min-w-0 overflow-auto rounded-xl bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100">{preview}</pre>
+           <div className="mt-2 flex flex-wrap gap-1">
+             {stableRecordingRules.slice(0, 4).map((rule) => <span key={rule} className="rounded-full bg-slate-100 px-2 py-1 text-[11px] text-slate-600">{rule}</span>)}
+           </div>
+diff -ruN oc_orig/mock/rpaMultiPageMock.ts oc_work/mock/rpaMultiPageMock.ts
+--- oc_orig/mock/rpaMultiPageMock.ts	1970-01-01 00:00:00.000000000 +0000
++++ oc_work/mock/rpaMultiPageMock.ts	2026-04-27 13:05:20.119969911 +0000
+@@ -0,0 +1,166 @@
++export const overviewKpis = [
++  { title: "Provider 在线", value: "5 / 6", note: "83% online", tone: "blue" },
++  { title: "设备在线数", value: "128", note: "较昨日 +12", tone: "green" },
++  { title: "Workflow 成功率", value: "96.2%", note: "近 7 日 +2.3pp", tone: "green" },
++  { title: "今日执行次数", value: "1,842", note: "较昨日 +18.6%", tone: "blue" },
++  { title: "异常恢复率", value: "92.7%", note: "自动恢复 511 次", tone: "green" },
++  { title: "待审批", value: "6", note: "2 个高危待处理", tone: "orange" }
++];
++
++export const providerHealthRows = [
++  { provider: "android_adb", states: ["healthy", "healthy", "healthy", "healthy", "healthy"] },
++  { provider: "windows_uia", states: ["healthy", "healthy", "healthy", "healthy", "healthy"] },
++  { provider: "playwright_browser", states: ["healthy", "degraded", "healthy", "healthy", "healthy"] },
++  { provider: "api_worker", states: ["healthy", "degraded", "degraded", "healthy", "healthy"] },
++  { provider: "ios_wda", states: ["unhealthy", "unhealthy", "degraded", "healthy", "offline"] },
++  { provider: "harmony_hdc", states: ["offline", "offline", "offline", "offline", "offline"] }
++];
++
++export const executionTrend = [
++  { day: "Mon", success: 1234, failure: 76 },
++  { day: "Tue", success: 1421, failure: 82 },
++  { day: "Wed", success: 1512, failure: 71 },
++  { day: "Thu", success: 1635, failure: 64 },
++  { day: "Fri", success: 1704, failure: 78 },
++  { day: "Sat", success: 1809, failure: 69 },
++  { day: "Sun", success: 1842, failure: 71 }
++];
++
++export const recentFailures = [
++  { id: "task_1f9a8c3d", provider: "playwright_browser", reason: "Element not found", risk: "L2", time: "10 min ago" },
++  { id: "task_8e7b2d11", provider: "windows_uia", reason: "UIA timeout", risk: "L1", time: "24 min ago" },
++  { id: "task_7c4d9a22", provider: "android_adb", reason: "Device disconnected", risk: "L3", time: "36 min ago" },
++  { id: "task_3a6f1e90", provider: "api_worker", reason: "HTTP 500", risk: "L2", time: "52 min ago" }
++];
++
++export const pendingActions = [
++  { title: "待安全审批", desc: "高风险动作等待人工确认", count: 6, tone: "orange" },
++  { title: "异常 Provider", desc: "ios_wda / harmony_hdc 需要处理", count: 2, tone: "red" },
++  { title: "低成功率 Workflow", desc: "成功率低于 90%", count: 4, tone: "orange" },
++  { title: "最近生成 Skill", desc: "等待审核或发布", count: 5, tone: "blue" }
++];
++
++export const fleetSummary = [
++  { title: "在线设备", value: "42", note: "较昨日 +8" },
++  { title: "忙碌设备", value: "15", note: "35.7% of online" },
++  { title: "离线设备", value: "9", note: "较昨日 -3" },
++  { title: "风险告警", value: "7", note: "需关注设备风险" }
++];
++
++export const fleetDevices = [
++  { id: "android_31a7c2", provider: "android_adb", platform: "Android 12", status: "online", target: "淘宝搜索商品流程", task: "Step 02 · tap search", risk: "L2", heartbeat: "6s ago" },
++  { id: "android_9f58b1", provider: "android_adb", platform: "Android 11", status: "online", target: "京东下单流程", task: "Step 04 · confirm order", risk: "L1", heartbeat: "9s ago" },
++  { id: "android_b72d9e", provider: "android_adb", platform: "Android 13", status: "busy", target: "拼多多商品采集", task: "Step 06 · scroll list", risk: "L1", heartbeat: "12s ago" },
++  { id: "desktop_7FK3", provider: "windows_uia", platform: "Windows 11", status: "online", target: "Report Studio", task: "Step 03 · export", risk: "L1", heartbeat: "8s ago" },
++  { id: "chromium_124", provider: "playwright_browser", platform: "Chromium", status: "online", target: "console login", task: "Step 05 · verify", risk: "L2", heartbeat: "14s ago" },
++  { id: "api_worker_01", provider: "api_worker", platform: "HTTP Worker", status: "busy", target: "POST /orders/search", task: "Step 02 · request", risk: "L0", heartbeat: "2s ago" },
++  { id: "android_3c91de", provider: "android_adb", platform: "Android 12", status: "offline", target: "-", task: "-", risk: "L3", heartbeat: "3m 22s ago" }
++];
++
++export const heartbeatStream = [
++  "19:31:20  android_31a7c2  online  Step 02 · tap search  6s ago",
++  "19:31:18  android_9f58b1  online  Step 04 · confirm order  9s ago",
++  "19:31:17  android_b72d9e  busy    Step 06 · scroll list  12s ago",
++  "19:31:15  desktop_7FK3    online  Step 03 · export  8s ago"
++];
++
++export const anomalyLogs = [
++  { level: "L3", text: "android_3c91de · Device offline > 180s", time: "3m 22s ago" },
++  { level: "L2", text: "android_31a7c2 · Element not found: search_btn", time: "4m 34s ago" },
++  { level: "L2", text: "android_1f0b88 · Screenshot mismatch > 30%", time: "5m 46s ago" },
++  { level: "L1", text: "android_7a65c0 · Slow response: 8.2s", time: "7m 5s ago" }
++];
++
++export const workflowAssets = [
++  { name: "淘宝搜索商品流程", schema: "1.1.3", provider: "android_adb", platform: "Android", steps: 17, success: "98.6%", lastRun: "2m ago", status: "ready" },
++  { name: "浏览器登录回归", schema: "1.0.2", provider: "playwright_browser", platform: "Web", steps: 14, success: "97.1%", lastRun: "51m ago", status: "draft" },
++  { name: "Windows 任务录制", schema: "1.0.0", provider: "windows_uia", platform: "Windows", steps: 22, success: "99.1%", lastRun: "2h ago", status: "ready" },
++  { name: "移动端登录重试", schema: "1.0.0", provider: "android_adb", platform: "Android", steps: 12, success: "96.4%", lastRun: "3h ago", status: "validated" },
++  { name: "API 数据抓取流程", schema: "1.0.0", provider: "api_worker", platform: "API", steps: 8, success: "99.8%", lastRun: "4h ago", status: "ready" }
++];
++
++export const workflowRuns = [
++  { run: "run_20240515_193125", by: "admin", env: "Android_S23", steps: "17 / 17", result: "success", rate: "100%", duration: "00:01:24" },
++  { run: "run_20240515_184211", by: "tester_02", env: "Pixel_7_Pro", steps: "17 / 17", result: "success", rate: "98.6%", duration: "00:01:37" },
++  { run: "run_20240515_160344", by: "admin", env: "Android_S23", steps: "16 / 17", result: "partial", rate: "94.1%", duration: "00:01:56" }
++];
++
++export const skillSources = [
++  { title: "淘宝搜索商品流程", id: "trace_20240508_193120", provider: "android_adb · Pixel 6", status: "success" },
++  { title: "京东搜索商品流程", id: "trace_20240508_184512", provider: "android_adb · Pixel 6", status: "success" },
++  { title: "拼多多浏览商品流程", id: "trace_20240508_175233", provider: "android_adb · Pixel 6", status: "success" },
++  { title: "登录并进入首页", id: "trace_20240508_171104", provider: "android_adb · Pixel 6", status: "partial" }
++];
++
++export const skillGroups = [
++  { id: "G1", name: "启动应用与进入搜索页", from: "6 steps", to: "1 step", saved: "83%" },
++  { id: "G2", name: "输入搜索关键词", from: "5 steps", to: "1 step", saved: "80%" },
++  { id: "G3", name: "执行搜索", from: "4 steps", to: "1 step", saved: "75%" },
++  { id: "G4", name: "筛选与排序（可选）", from: "18 steps", to: "3 steps", saved: "83%" },
++  { id: "G5", name: "浏览搜索结果", from: "42 steps", to: "5 steps", saved: "88%" }
++];
++
++export const executionQueue = [
++  { priority: "P0", task: "淘宝搜索商品流程", id: "#a1b2c3d4", status: "运行中", progress: "45%", eta: "01:30", submitted: "19:35:12" },
++  { priority: "P0", task: "Windows 任务录制", id: "#e5f6g7h8", status: "运行中", progress: "12%", eta: "02:10", submitted: "19:34:58" },
++  { priority: "P1", task: "Browser 登录回归", id: "#i9j0k1l2", status: "排队中", progress: "-", eta: "01:45", submitted: "19:34:41" },
++  { priority: "P1", task: "淘宝搜索商品流程", id: "#m3n4o5p6", status: "排队中", progress: "-", eta: "01:30", submitted: "19:34:30" },
++  { priority: "P2", task: "API 数据抓取流程", id: "#u1v2w3x4", status: "成功", progress: "100%", eta: "01:32", submitted: "19:31:02" },
++  { priority: "P0", task: "淘宝搜索商品流程", id: "#k7l8m9n0", status: "失败", progress: "18%", eta: "01:12", submitted: "19:27:14" }
++];
++
++export const executionLogs = [
++  "19:36:00.125 INFO  [Engine] Execution started · workflow=淘宝搜索商品流程 · provider=android_adb",
++  "19:36:00.236 INFO  [Device] Connected to android-0014 (emulator-5554)",
++  "19:36:01.543 INFO  [Step 02] Observe Keyframe · screenshot captured · ui tree updated",
++  "19:36:03.112 INFO  [Step 03] Action Inspector · tap search field",
++  "19:36:03.678 WARN  [Step 03] Element not found on first attempt, retrying (1/3)",
++  "19:36:04.889 INFO  [Step 03] Action executed successfully"
++];
++
++export const traceList = [
++  { id: "task_20240522_0017", workflow: "wf_taobao_search", status: "failed", note: "Step 04 failed" },
++  { id: "task_20240522_0016", workflow: "wf_taobao_search", status: "partial", note: "Step 06 failed" },
++  { id: "task_20240522_0015", workflow: "wf_taobao_search", status: "success", note: "completed" },
++  { id: "task_20240522_0014", workflow: "wf_login_flow", status: "success", note: "completed" }
++];
++
++export const traceReplaySteps = [
++  { step: "1", title: "Observe Home Screen", action: "observe · android_adb", status: "success", time: "00:00.000" },
++  { step: "2", title: "Tap Search Input", action: "tap · android_adb", status: "success", time: "00:07.421" },
++  { step: "3", title: "Input Keyword", action: "input_text · android_adb", status: "success", time: "00:18.932" },
++  { step: "4", title: "Tap Search Button", action: "tap · android_adb", status: "failed", time: "00:31.114" },
++  { step: "5", title: "Observe Result List", action: "observe · android_adb", status: "skipped", time: "00:45.672" }
++];
++
++export const approvals = [
++  { action: "安装 APK", device: "Pixel_7_001", resource: "com.example.malicious.apk", risk: "L3", time: "2 分钟前" },
++  { action: "卸载 App", device: "Pixel_3a_002", resource: "com.bank.mobile", risk: "L3", time: "5 分钟前" },
++  { action: "支付", device: "Pixel_7_001", resource: "¥1,299.00", risk: "L3", time: "8 分钟前" },
++  { action: "下单", device: "Pixel_4a_003", resource: "Order #A20240518001", risk: "L2", time: "12 分钟前" },
++  { action: "发消息", device: "Pixel_3a_002", resource: "To: +86 188****1234", risk: "L2", time: "15 分钟前" },
++  { action: "读取通讯录", device: "Pixel_7_001", resource: "Access contacts", risk: "L2", time: "18 分钟前" },
++  { action: "访问剪贴板", device: "Pixel_4a_003", resource: "clipboard content", risk: "L2", time: "22 分钟前" },
++  { action: "删除文件", device: "Pixel_3a_002", resource: "/sdcard/Download/report.pdf", risk: "L1", time: "25 分钟前" }
++];
++
++export const memoryCategories = [
++  { name: "Trace Memory", count: 1248, desc: "从 Trace 中提炼观察与模式" },
++  { name: "Workflow Memory", count: 642, desc: "Workflow 设计与优化经验" },
++  { name: "Skill Memory", count: 389, desc: "Skill 构建与调优知识" },
++  { name: "Recovery Experience", count: 287, desc: "异常恢复与错误处理经验" },
++  { name: "Success Experience", count: 523, desc: "高成功率方案与模式" },
++  { name: "Candidate Skills", count: 176, desc: "待验证技能片段" }
++];
++
++export const memoryItems = [
++  { title: "淘宝搜索页 - 关键词输入稳定定位", relevance: "0.96", fresh: "2h ago", type: "Trace", compression: "原始" },
++  { title: "搜索商品流程 - 结果页加载等待策略", relevance: "0.92", fresh: "6h ago", type: "Workflow", compression: "压缩 60%" },
++  { title: "滑动到底部的通用实现", relevance: "0.89", fresh: "1d ago", type: "Skill", compression: "压缩 45%" },
++  { title: "输入法弹出导致元素遮挡的恢复经验", relevance: "0.88", fresh: "2d ago", type: "Recovery", compression: "压缩 70%" },
++  { title: "搜索无结果时的分支处理模式", relevance: "0.81", fresh: "3d ago", type: "Workflow", compression: "原始" }
++];
++
++export const settingsSections = [
++  "Provider Config", "API Base URL", "Data Directory", "Screenshot Policy", "OCR", "Safety Policy", "Approval Rules", "Log Retention", "Skill Output Format", "Theme", "User Permissions"
++];
+diff -ruN oc_orig/pages/rpa/DeviceFleetPage.tsx oc_work/pages/rpa/DeviceFleetPage.tsx
+--- oc_orig/pages/rpa/DeviceFleetPage.tsx	1970-01-01 00:00:00.000000000 +0000
++++ oc_work/pages/rpa/DeviceFleetPage.tsx	2026-04-27 13:07:58.784933475 +0000
+@@ -0,0 +1,89 @@
++import { MoreVertical, Radio, RefreshCw, Search, Smartphone } from "lucide-react";
++
++import { Badge } from "../../components/ui/badge";
++import { Button } from "../../components/ui/button";
++import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
++import { anomalyLogs, fleetDevices, fleetSummary, heartbeatStream } from "../../mock/rpaMultiPageMock";
++
++type BadgeTone = "blue" | "green" | "orange" | "red" | "slate";
++
++function riskTone(risk: string): BadgeTone {
++  if (risk === "L3") return "red";
++  if (risk === "L2") return "orange";
++  return "green";
++}
++
++export function DeviceFleetPage() {
++  const selected = fleetDevices[0];
++
++  return (
++    <div className="space-y-4">
++      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-4">
++        {fleetSummary.map((item, index) => (
++          <Card key={item.title} className="p-4">
++            <div className="flex items-center justify-between">
++              <div>
++                <div className="text-sm font-medium text-slate-500">{item.title}</div>
++                <div className="mt-2 text-3xl font-semibold text-slate-950">{item.value}</div>
++                <div className="mt-1 text-xs text-slate-500">{item.note}</div>
++              </div>
++              <div className="rounded-2xl bg-blue-50 p-3 text-blue-700 ring-1 ring-blue-100">
++                {index === 0 ? <Radio className="h-6 w-6" /> : <Smartphone className="h-6 w-6" />}
++              </div>
++            </div>
++          </Card>
++        ))}
++      </section>
++
++      <section className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(0,1fr)_360px]">
++        <Card>
++          <CardHeader className="flex-wrap">
++            <div className="flex min-w-0 flex-1 flex-wrap gap-2">
++              {[["Android Phones", "24"], ["Windows Desktops", "11"], ["Browser Sessions", "14"], ["API Workers", "6"], ["All Devices", "55"]].map(([tab, count], index) => (
++                <button key={tab} className={`rounded-xl px-3 py-2 text-sm font-semibold ${index === 0 ? "bg-blue-50 text-blue-700 ring-1 ring-blue-100" : "text-slate-500 hover:bg-slate-50"}`}>{tab} <span className="ml-1 text-xs">{count}</span></button>
++              ))}
++            </div>
++            <Button size="sm"><RefreshCw className="h-4 w-4" />刷新</Button>
++          </CardHeader>
++          <CardContent>
++            <div className="mb-3 flex flex-wrap gap-2">
++              <div className="flex h-10 min-w-[240px] flex-1 items-center gap-2 rounded-xl border border-slate-200 px-3 text-sm text-slate-400"><Search className="h-4 w-4" />搜索设备 ID / 目标 / 标签</div>
++              <Button size="sm">Filters</Button><Button size="sm">Status: All</Button>
++            </div>
++            <div className="overflow-x-auto rounded-xl border border-slate-100">
++              <table className="min-w-[980px] w-full text-left text-sm">
++                <thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="px-3 py-3">设备ID</th><th>Provider</th><th>平台</th><th>状态</th><th>当前目标</th><th>当前任务</th><th>风险</th><th>最近心跳</th><th>操作</th></tr></thead>
++                <tbody className="divide-y divide-slate-100">
++                  {fleetDevices.map((device) => (
++                    <tr key={device.id} className={device.id === selected.id ? "bg-blue-50/50" : ""}>
++                      <td className="px-3 py-3 font-semibold text-blue-600">{device.id}</td><td>{device.provider}</td><td>{device.platform}</td>
++                      <td><span className={`inline-flex items-center gap-1 ${device.status === "offline" ? "text-slate-400" : device.status === "busy" ? "text-amber-600" : "text-emerald-600"}`}><i className="h-2 w-2 rounded-full bg-current" />{device.status}</span></td>
++                      <td>{device.target}</td><td>{device.task}</td><td><Badge tone={riskTone(device.risk)}>{device.risk}</Badge></td><td className="text-emerald-600">{device.heartbeat}</td><td><MoreVertical className="h-4 w-4 text-slate-400" /></td>
++                    </tr>
++                  ))}
++                </tbody>
++              </table>
++            </div>
++          </CardContent>
++        </Card>
++
++        <Card>
++          <CardHeader><CardTitle>选中设备详情</CardTitle><Badge tone="green">online</Badge></CardHeader>
++          <CardContent className="space-y-4 text-sm">
++            <div className="flex gap-3"><div className="flex h-24 w-16 items-center justify-center rounded-xl bg-slate-900 text-white">Phone</div><div><div className="font-semibold text-slate-950">{selected.id}</div><div className="mt-2 text-slate-500">Android 12 · SDK 31</div><div className="text-slate-500">1080 × 2400 · 420dpi</div><div className="text-slate-500">Provider: {selected.provider}</div></div></div>
++            <div className="grid grid-cols-2 gap-2 text-xs">{["production", "ecommerce", "cn-region", "mock-ready"].map((tag) => <span key={tag} className="rounded-full bg-slate-100 px-2 py-1 text-center text-slate-600">{tag}</span>)}</div>
++            <div className="rounded-xl border border-slate-100 p-3"><div className="font-semibold">Active Session</div><div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-500"><span>Workflow</span><b className="text-slate-700">淘宝搜索商品流程</b><span>Uptime</span><b className="text-slate-700">00:14:32</b><span>Current Step</span><b className="text-slate-700">Step 02 · tap search</b></div></div>
++            <div className="rounded-xl border border-slate-100 p-3"><div className="font-semibold">Last Screenshot</div><div className="mt-3 flex h-24 items-center justify-center rounded-xl bg-gradient-to-br from-orange-50 to-blue-50 text-xs text-slate-500">Taobao keyframe preview</div></div>
++            <div className="grid grid-cols-2 gap-2"><Button variant="primary">Connect</Button><Button variant="danger">Disconnect</Button></div>
++            <Button className="w-full">打开实时调试</Button>
++          </CardContent>
++        </Card>
++      </section>
++
++      <section className="grid grid-cols-1 gap-4 2xl:grid-cols-2">
++        <Card><CardHeader><CardTitle>最近 Heartbeat</CardTitle></CardHeader><CardContent className="space-y-2 text-xs text-slate-600">{heartbeatStream.map((line) => <div key={line} className="rounded-xl bg-slate-50 p-3">{line}</div>)}</CardContent></Card>
++        <Card><CardHeader><CardTitle>异常日志</CardTitle></CardHeader><CardContent className="space-y-2 text-xs">{anomalyLogs.map((item) => <div key={item.text} className="flex items-center justify-between rounded-xl bg-slate-50 p-3"><span><Badge tone={riskTone(item.level)}>{item.level}</Badge> {item.text}</span><span className="text-slate-400">{item.time}</span></div>)}</CardContent></Card>
++      </section>
++    </div>
++  );
++}
+diff -ruN oc_orig/pages/rpa/ExecutorPage.tsx oc_work/pages/rpa/ExecutorPage.tsx
+--- oc_orig/pages/rpa/ExecutorPage.tsx	1970-01-01 00:00:00.000000000 +0000
++++ oc_work/pages/rpa/ExecutorPage.tsx	2026-04-27 13:07:58.801517426 +0000
+@@ -0,0 +1,25 @@
++import { Pause, Play, RotateCcw, Square, Terminal } from "lucide-react";
++
++import { Badge } from "../../components/ui/badge";
++import { Button } from "../../components/ui/button";
++import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
++import { executionLogs, executionQueue } from "../../mock/rpaMultiPageMock";
++
++type BadgeTone = "blue" | "green" | "orange" | "red" | "slate";
++
++function statusTone(status: string): BadgeTone {
++  if (status === "失败") return "red";
++  if (status === "成功") return "green";
++  if (status === "运行中") return "blue";
++  return "orange";
++}
++
++export function ExecutorPage() {
++  return (
++    <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[320px_minmax(0,1fr)_420px]">
++      <Card><CardHeader><CardTitle>任务配置</CardTitle><Button size="sm">保存为模板</Button></CardHeader><CardContent className="space-y-4 text-sm"><section><div className="mb-2 font-semibold">1. 执行对象</div><div className="grid grid-cols-2 gap-2"><Button variant="primary">Workflow</Button><Button>Skill</Button></div><div className="mt-2 rounded-xl border border-slate-200 p-3">淘宝搜索商品流程<br/><span className="text-xs text-emerald-600">v1.2.3 · 已发布</span></div></section><section><div className="mb-2 font-semibold">2. Provider / Device</div><div className="rounded-xl border border-slate-200 p-3">android_adb <span className="float-right text-emerald-600">online</span><div className="text-xs text-slate-500">Mobile device bridge</div></div></section><section><div className="mb-2 font-semibold">3. 参数配置</div>{[["keyword","无线耳机"],["search_input","无线耳机"],["sort","综合"],["page_limit","2"]].map(([k,v])=><label key={k} className="mb-2 grid grid-cols-[100px_1fr] items-center gap-2"><span className="text-slate-500">{k}</span><input className="h-9 rounded-lg border border-slate-200 px-3" defaultValue={v}/></label>)}</section><section><div className="mb-2 font-semibold">4. 执行选项</div><div className="grid grid-cols-2 gap-2"><Button>Dry Run</Button><Button>指数退避</Button><Button>并发 1</Button><Button>超时 300s</Button></div></section><Button variant="primary" className="w-full"><Play className="h-4 w-4" />提交执行</Button></CardContent></Card>
++      <div className="space-y-4"><Card><CardHeader><CardTitle>执行队列</CardTitle><Button variant="primary" size="sm">+ 新建执行</Button></CardHeader><CardContent><div className="mb-3 flex flex-wrap gap-2">{["全部 12","排队 3","运行中 2","成功 6","失败 1"].map((tab,index)=><Badge key={tab} tone={index===0?"blue":"slate"}>{tab}</Badge>)}</div><div className="overflow-x-auto rounded-xl border border-slate-100"><table className="min-w-[760px] w-full text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="px-3 py-3">优先级</th><th>任务/实例</th><th>状态</th><th>进度</th><th>预计耗时</th><th>提交时间</th></tr></thead><tbody className="divide-y divide-slate-100">{executionQueue.map((job)=><tr key={job.id}><td className="px-3 py-3"><Badge tone={job.priority==="P0"?"red":job.priority==="P1"?"orange":"blue"}>{job.priority}</Badge></td><td><div className="font-medium text-slate-900">{job.task}</div><div className="text-xs text-slate-500">{job.id}</div></td><td><Badge tone={statusTone(job.status)}>{job.status}</Badge></td><td>{job.progress}</td><td>{job.eta}</td><td>{job.submitted}</td></tr>)}</tbody></table></div></CardContent></Card><Card><CardHeader><CardTitle><Terminal className="mr-2 inline h-4 w-4" />执行日志</CardTitle><Button size="sm">下载日志</Button></CardHeader><CardContent><pre className="max-h-[280px] overflow-auto rounded-2xl bg-slate-950 p-4 text-xs leading-6 text-slate-100">{executionLogs.join("\n")}</pre></CardContent></Card></div>
++      <div className="space-y-4"><Card><CardHeader><CardTitle>当前运行状态</CardTitle><Badge tone="blue">运行中</Badge></CardHeader><CardContent className="space-y-4"><div className="grid grid-cols-2 gap-3 text-sm"><div><span className="text-slate-500">实例 ID</span><b className="block">a1b2c3d4</b></div><div><span className="text-slate-500">运行时长</span><b className="block">00:00:48</b></div></div><div><div className="mb-1 flex justify-between text-sm"><span>总体进度</span><b>45%</b></div><div className="h-2 rounded-full bg-slate-100"><div className="h-2 w-[45%] rounded-full bg-blue-600" /></div></div><div className="rounded-xl border border-slate-100 p-3 text-sm"><b>android-0014</b><div className="text-xs text-slate-500">Android 13 · 1080x2340 · 76%</div></div><div className="rounded-xl bg-blue-50 p-3 text-sm"><Badge tone="blue">Step 03</Badge> Action Inspector · tap search field</div><div className="grid grid-cols-5 gap-2">{Array.from({length:5}).map((_,i)=><div key={i} className={`h-20 rounded-lg ${i===2?"ring-2 ring-blue-500":"ring-1 ring-slate-200"} bg-gradient-to-b from-white to-slate-100`} />)}</div><div className="grid grid-cols-3 gap-2"><Button><Pause className="h-4 w-4" />暂停</Button><Button variant="danger"><Square className="h-4 w-4" />停止</Button><Button><RotateCcw className="h-4 w-4" />重试</Button></div></CardContent></Card><Card><CardHeader><CardTitle>失败恢复策略</CardTitle></CardHeader><CardContent className="space-y-2 text-sm">{["从当前步骤重试","从上一步重试","跳过当前步骤","终止并标记失败"].map((item)=><div key={item} className="rounded-xl border border-slate-100 p-3">{item}</div>)}</CardContent></Card></div>
++    </div>
++  );
++}
+diff -ruN oc_orig/pages/rpa/MemoryCenterPage.tsx oc_work/pages/rpa/MemoryCenterPage.tsx
+--- oc_orig/pages/rpa/MemoryCenterPage.tsx	1970-01-01 00:00:00.000000000 +0000
++++ oc_work/pages/rpa/MemoryCenterPage.tsx	2026-04-27 13:07:10.195727722 +0000
+@@ -0,0 +1,19 @@
++import { Brain, Download, Pin, Search, Trash2 } from "lucide-react";
++
++import { Badge } from "../../components/ui/badge";
++import { Button } from "../../components/ui/button";
++import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
++import { memoryCategories, memoryItems } from "../../mock/rpaMultiPageMock";
++
++export function MemoryCenterPage() {
++  return (
++    <div className="space-y-4">
++      <section className="grid grid-cols-1 gap-4 2xl:grid-cols-[260px_minmax(0,1fr)_420px]">
++        <Card><CardHeader><CardTitle>记忆分类</CardTitle></CardHeader><CardContent className="space-y-3">{memoryCategories.map((item,index)=><div key={item.name} className={`rounded-xl border p-3 ${index===0?"border-blue-200 bg-blue-50":"border-slate-100"}`}><div className="flex items-center justify-between"><b>{item.name}</b><Badge tone={index===0?"blue":"slate"}>{item.count}</Badge></div><div className="mt-1 text-xs text-slate-500">{item.desc}</div></div>)}<div className="rounded-2xl border border-slate-100 p-4"><div className="flex items-center gap-3"><div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 text-emerald-700 ring-8 ring-emerald-100"><Brain className="h-6 w-6" /></div><div><b>3,265</b><div className="text-xs text-slate-500">Total Memories</div></div></div><div className="mt-3 h-2 rounded-full bg-slate-100"><div className="h-2 w-[62%] rounded-full bg-emerald-500" /></div></div></CardContent></Card>
++        <Card><CardHeader><div><CardTitle>记忆列表</CardTitle><div className="mt-1 text-xs text-slate-500">1,248 memories</div></div></CardHeader><CardContent><div className="mb-3 flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-3 text-sm text-slate-400"><Search className="h-4 w-4" />搜索记忆内容、标签、来源...</div><div className="mb-3 flex flex-wrap gap-2">{["类型","相关度","新鲜度","关联 Provider","压缩状态","重置"].map((filter)=><Button key={filter} size="sm">{filter}</Button>)}</div><div className="overflow-x-auto rounded-xl border border-slate-100"><table className="min-w-[760px] w-full text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="px-3 py-3">Memory</th><th>Relevance</th><th>Freshness</th><th>Type</th><th>Provider</th><th>Compression</th></tr></thead><tbody className="divide-y divide-slate-100">{memoryItems.map((item,index)=><tr key={item.title} className={index===1?"bg-blue-50/50":""}><td className="px-3 py-3"><b>{item.title}</b><div className="text-xs text-slate-500">沉淀为可检索经验与执行策略...</div></td><td><span className="font-semibold text-emerald-600">{item.relevance}</span></td><td>{item.fresh}</td><td><Badge tone={item.type==="Recovery"?"orange":item.type==="Skill"?"blue":"green"}>{item.type}</Badge></td><td>android_adb</td><td>{item.compression}</td></tr>)}</tbody></table></div></CardContent></Card>
++        <Card><CardHeader><CardTitle>记忆详情</CardTitle><Badge tone="orange">Pinned</Badge></CardHeader><CardContent className="space-y-4 text-sm"><section><h3 className="text-lg font-semibold text-slate-950">搜索商品流程 - 结果页加载等待策略</h3><p className="mt-2 text-slate-500">总结在淘宝搜索结果页中，如何稳定判断结果加载完成。对比元素存在、列表数量稳定、关键元素可见、网络空闲，并给出优先级建议。</p></section><section><div className="mb-2 font-semibold">Tags</div><div className="flex flex-wrap gap-2">{["等待策略","结果页","加载完成","列表","稳定性"].map((tag)=><Badge key={tag}>{tag}</Badge>)}</div></section><section><div className="mb-2 font-semibold">Embedding / Metadata</div><div className="grid grid-cols-2 gap-2 text-xs">{["Relevance 0.92","Freshness 6h ago","Type Workflow","Provider android_adb","Dim 1536","Tokens 912","Compression 60%","Source Traces 12"].map((meta)=><span key={meta} className="rounded-lg bg-slate-100 px-2 py-1">{meta}</span>)}</div></section><section><div className="mb-2 font-semibold">Related Assets</div><div className="grid grid-cols-2 gap-2 text-xs">{["trc_a1b2c3d4","wf_search_product_v2","skill_wait_list_stable","exp_slow_network_wait"].map((asset)=><span key={asset} className="rounded-lg border border-slate-100 p-2">{asset}</span>)}</div></section><div className="flex flex-wrap gap-2"><Button variant="primary">Compress</Button><Button variant="danger"><Trash2 className="h-4 w-4" />Forget</Button><Button><Download className="h-4 w-4" />Export</Button><Button><Pin className="h-4 w-4" />Pin</Button></div></CardContent></Card>
++      </section>
++      <Card><CardHeader><CardTitle>Trace / Workflow / Skill 关联图</CardTitle><div className="flex gap-2"><Badge>Graph View</Badge><Badge>深度 2</Badge></div></CardHeader><CardContent><div className="relative min-h-[260px] overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 p-6"><div className="mx-auto flex h-full max-w-5xl items-center justify-center"><div className="grid grid-cols-3 gap-8 text-center text-sm"><div className="space-y-3">{["结果页首次加载 Trace","慢网环境加载 Trace","无结果页 Trace"].map((node)=><div key={node} className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-emerald-800">{node}</div>)}</div><div className="flex items-center"><div className="rounded-2xl border-2 border-blue-300 bg-blue-50 p-5 font-semibold text-blue-800">搜索商品流程 - 结果页加载等待策略<br/><span className="text-xs">Workflow Memory</span></div></div><div className="space-y-3">{["淘宝搜索商品流程 v2","列表加载完成等待 Skill","高成功率：商品筛选策略"].map((node)=><div key={node} className="rounded-xl border border-blue-200 bg-white p-3 text-blue-800">{node}</div>)}</div></div></div></div></CardContent></Card>
++    </div>
++  );
++}
+diff -ruN oc_orig/pages/rpa/OverviewDashboard.tsx oc_work/pages/rpa/OverviewDashboard.tsx
+--- oc_orig/pages/rpa/OverviewDashboard.tsx	1970-01-01 00:00:00.000000000 +0000
++++ oc_work/pages/rpa/OverviewDashboard.tsx	2026-04-27 13:05:50.180098465 +0000
+@@ -0,0 +1,122 @@
++import { Activity, AlertTriangle, ArrowRight, CheckCircle2, Clock, Radio, ShieldCheck, Smartphone } from "lucide-react";
++
++import { Badge } from "../../components/ui/badge";
++import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
++import { executionTrend, overviewKpis, pendingActions, providerHealthRows, recentFailures } from "../../mock/rpaMultiPageMock";
++
++const toneClass: Record<string, string> = {
++  blue: "bg-blue-50 text-blue-700 ring-blue-200",
++  green: "bg-emerald-50 text-emerald-700 ring-emerald-200",
++  orange: "bg-amber-50 text-amber-700 ring-amber-200",
++  red: "bg-red-50 text-red-700 ring-red-200"
++};
++
++const stateDot: Record<string, string> = {
++  healthy: "bg-emerald-500",
++  degraded: "bg-amber-500",
++  unhealthy: "bg-red-500",
++  offline: "bg-slate-300"
++};
++
++export function OverviewDashboard() {
++  return (
++    <div className="space-y-4">
++      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
++        {overviewKpis.map((item, index) => {
++          const Icon = [Radio, Smartphone, Activity, Clock, CheckCircle2, ShieldCheck][index] ?? Activity;
++          return (
++            <Card key={item.title} className="p-4">
++              <div className="flex items-start justify-between gap-3">
++                <div className="min-w-0">
++                  <div className="truncate text-sm font-medium text-slate-500">{item.title}</div>
++                  <div className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{item.value}</div>
++                  <div className="mt-2 text-xs text-emerald-600">{item.note}</div>
++                </div>
++                <div className={`rounded-2xl p-3 ring-1 ${toneClass[item.tone]}`}>
++                  <Icon className="h-5 w-5" />
++                </div>
++              </div>
++            </Card>
++          );
++        })}
++      </section>
++
++      <section className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
++        <Card>
++          <CardHeader>
++            <CardTitle>Provider 健康矩阵</CardTitle>
++            <div className="flex gap-3 text-xs text-slate-500">
++              <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-emerald-500" />Healthy</span>
++              <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-amber-500" />Degraded</span>
++              <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-red-500" />Unhealthy</span>
++            </div>
++          </CardHeader>
++          <CardContent className="overflow-x-auto">
++            <div className="min-w-[560px] rounded-xl border border-slate-100">
++              <div className="grid grid-cols-[1.2fr_repeat(5,0.7fr)] border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
++                <span>Provider</span><span>-24h</span><span>-18h</span><span>-12h</span><span>-6h</span><span>Now</span>
++              </div>
++              {providerHealthRows.map((row) => (
++                <div key={row.provider} className="grid grid-cols-[1.2fr_repeat(5,0.7fr)] items-center border-b border-slate-100 px-3 py-3 text-sm last:border-b-0">
++                  <span className="truncate font-medium text-slate-700">{row.provider}</span>
++                  {row.states.map((state, index) => <span key={`${row.provider}-${index}`} className={`h-3 w-3 rounded-full ${stateDot[state]}`} />)}
++                </div>
++              ))}
++            </div>
++          </CardContent>
++        </Card>
++
++        <Card>
++          <CardHeader>
++            <CardTitle>近 7 日执行趋势</CardTitle>
++            <Badge tone="slate">Daily</Badge>
++          </CardHeader>
++          <CardContent>
++            <div className="h-[300px] rounded-2xl border border-slate-100 bg-gradient-to-b from-slate-50 to-white p-4">
++              <div className="flex h-full items-end gap-3">
++                {executionTrend.map((item) => {
++                  const successHeight = Math.max(28, item.success / 12);
++                  const failureHeight = Math.max(8, item.failure / 2.5);
++                  return (
++                    <div key={item.day} className="flex min-w-0 flex-1 flex-col items-center gap-2">
++                      <div className="flex h-[220px] w-full items-end justify-center gap-1">
++                        <div className="w-1/2 max-w-[34px] rounded-t-xl bg-emerald-500/80" style={{ height: successHeight }} title={`${item.success}`} />
++                        <div className="w-1/3 max-w-[22px] rounded-t-xl bg-red-400/80" style={{ height: failureHeight }} title={`${item.failure}`} />
++                      </div>
++                      <div className="text-xs text-slate-500">{item.day}</div>
++                    </div>
++                  );
++                })}
++              </div>
++            </div>
++            <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
++              <div className="rounded-xl bg-emerald-50 p-3 text-emerald-700">Success 13,157</div>
++              <div className="rounded-xl bg-red-50 p-3 text-red-700">Failure 511</div>
++              <div className="rounded-xl bg-blue-50 p-3 text-blue-700">Success Rate 96.2%</div>
++            </div>
++          </CardContent>
++        </Card>
++      </section>
++
++      <section className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
++        <Card>
++          <CardHeader><CardTitle>最近失败任务</CardTitle><button className="text-xs font-semibold text-blue-600">查看全部</button></CardHeader>
++          <CardContent className="overflow-x-auto">
++            <table className="min-w-[680px] w-full text-left text-sm">
++              <thead className="text-xs text-slate-500"><tr><th className="py-2">Task ID</th><th>Provider</th><th>失败原因</th><th>风险</th><th>时间</th></tr></thead>
++              <tbody className="divide-y divide-slate-100">
++                {recentFailures.map((row) => <tr key={row.id}><td className="py-3 font-medium text-blue-600">{row.id}</td><td>{row.provider}</td><td>{row.reason}</td><td><Badge tone={row.risk === "L3" ? "red" : row.risk === "L2" ? "orange" : "green"}>{row.risk}</Badge></td><td>{row.time}</td></tr>)}
++              </tbody>
++            </table>
++          </CardContent>
++        </Card>
++        <Card>
++          <CardHeader><CardTitle>待处理事项</CardTitle><AlertTriangle className="h-4 w-4 text-amber-500" /></CardHeader>
++          <CardContent className="space-y-3">
++            {pendingActions.map((item) => <div key={item.title} className="flex items-center gap-3 rounded-xl border border-slate-100 p-3"><div className={`rounded-xl p-2 ring-1 ${toneClass[item.tone]}`}><AlertTriangle className="h-4 w-4" /></div><div className="min-w-0 flex-1"><div className="font-medium text-slate-900">{item.title}</div><div className="text-xs text-slate-500">{item.desc}</div></div><div className="text-2xl font-semibold text-slate-950">{item.count}</div><ArrowRight className="h-4 w-4 text-slate-400" /></div>)}
++          </CardContent>
++        </Card>
++      </section>
++    </div>
++  );
++}
+diff -ruN oc_orig/pages/rpa/ProviderStudio.tsx oc_work/pages/rpa/ProviderStudio.tsx
+--- oc_orig/pages/rpa/ProviderStudio.tsx	2026-04-27 19:39:44.000000000 +0000
++++ oc_work/pages/rpa/ProviderStudio.tsx	2026-04-27 12:03:24.038861315 +0000
+@@ -62,22 +62,22 @@
+   return (
+     <div className="space-y-4">
+       <div className="flex justify-end">
+-        <div className="flex gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-card">
++        <div className="flex max-w-full flex-wrap gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-card">
+           <span>React + TypeScript</span>
+           <span>Tailwind</span>
+           <span>shadcn/ui</span>
+           <span className="text-emerald-600">● {connectionMessage}</span>
+         </div>
+       </div>
+-      <div className="grid grid-cols-5 gap-4">
++      <div className="kpi-grid grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+         {providerKpis.map((metric, index) => <KpiCard key={metric.title} metric={metric} index={index} />)}
+       </div>
+-      <div className="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.9fr)_minmax(0,1.05fr)] gap-4">
++      <div className="rpa-page-grid xl:grid-cols-2 min-[1720px]:grid-cols-[minmax(0,1.15fr)_minmax(0,0.9fr)_minmax(0,1.05fr)]">
+         <ProviderRegistry providers={providers} activeProvider={selectedProvider} onSelect={selectProvider} onTest={(name) => void testConnection(name)} />
+         <BridgeTopology nodes={bridgeTopologyNodes} />
+         <ProviderDetail provider={provider} />
+       </div>
+-      <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,0.95fr)_minmax(0,1.05fr)] gap-4">
++      <div className="rpa-page-grid xl:grid-cols-2 min-[1720px]:grid-cols-[minmax(0,1.1fr)_minmax(0,0.95fr)_minmax(0,1.05fr)]">
+         <WorkflowLibrary workflows={workflows} />
+         <RecordingEditStudio workflow={workflows[1]} initialSteps={steps} onSave={saveWorkflow} />
+         <SkillOutputVersion skills={skills} />
+diff -ruN oc_orig/pages/rpa/RealtimeConsole.tsx oc_work/pages/rpa/RealtimeConsole.tsx
+--- oc_orig/pages/rpa/RealtimeConsole.tsx	2026-04-27 19:39:44.000000000 +0000
++++ oc_work/pages/rpa/RealtimeConsole.tsx	2026-04-27 12:03:24.037894777 +0000
+@@ -86,10 +86,10 @@
+ 
+   return (
+     <div className="space-y-4">
+-      <div className="grid grid-cols-5 gap-4">
++      <div className="kpi-grid grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+         {realtimeKpis.map((metric, index) => <KpiCard key={metric.title} metric={metric} index={index} />)}
+       </div>
+-      <div className="grid grid-cols-[minmax(0,1.05fr)_minmax(0,0.82fr)_minmax(0,1.25fr)] gap-4">
++      <div className="rpa-page-grid xl:grid-cols-2 min-[1720px]:grid-cols-[minmax(0,1.05fr)_minmax(0,0.82fr)_minmax(0,1.25fr)]">
+         <DeviceLiveView
+           activeProvider={activeProvider}
+           onProviderChange={onProviderChange}
+@@ -100,7 +100,7 @@
+         <RecordingFlow steps={flow} />
+         <ActionInspector traceStep={selectedStep} bridgeNodes={bridgeInspectorNodes.map((node) => node.id === "provider" ? { ...node, label: activeProvider } : node)} />
+       </div>
+-      <div className="grid grid-cols-[minmax(0,1.12fr)_minmax(0,0.94fr)_minmax(0,1fr)] gap-4">
++      <div className="rpa-page-grid xl:grid-cols-2 min-[1720px]:grid-cols-[minmax(0,1.12fr)_minmax(0,0.94fr)_minmax(0,1fr)]">
+         <TimelineLog rows={timeline} selectedStepId={selectedStepId} onSelect={(step) => setSelectedStepId(step.stepId)} />
+         <WorkflowSkillBuilder onGenerateSkill={generateSkill} />
+         <SafetyApprovalPanel approvals={approvals} onDecision={(approval, status) => void decideApproval(approval, status)} />
+diff -ruN oc_orig/pages/rpa/SafetyApprovalPage.tsx oc_work/pages/rpa/SafetyApprovalPage.tsx
+--- oc_orig/pages/rpa/SafetyApprovalPage.tsx	1970-01-01 00:00:00.000000000 +0000
++++ oc_work/pages/rpa/SafetyApprovalPage.tsx	2026-04-27 13:07:58.833765051 +0000
+@@ -0,0 +1,32 @@
++import { ShieldAlert, ShieldCheck } from "lucide-react";
++
++import { Badge } from "../../components/ui/badge";
++import { Button } from "../../components/ui/button";
++import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
++import { approvals } from "../../mock/rpaMultiPageMock";
++
++type BadgeTone = "blue" | "green" | "orange" | "red" | "slate";
++
++function riskTone(risk: string): BadgeTone {
++  return risk === "L3" ? "red" : risk === "L2" ? "orange" : "green";
++}
++
++export function SafetyApprovalPage() {
++  const current = approvals[0];
++
++  return (
++    <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[330px_minmax(0,1fr)_360px]">
++      <Card><CardHeader><CardTitle>审批队列</CardTitle><Badge tone="red">8</Badge></CardHeader><CardContent className="space-y-3"><div className="flex flex-wrap gap-2"><Badge tone="blue">全部</Badge><Badge>L1</Badge><Badge tone="orange">L2</Badge><Badge tone="red">L3</Badge></div>{approvals.map((item,index)=><div key={item.action} className={`rounded-xl border p-3 ${index===0?"border-blue-200 bg-blue-50":"border-slate-100"}`}><div className="flex items-center justify-between"><b>{item.action}</b><Badge tone={riskTone(item.risk)}>{item.risk}</Badge></div><div className="mt-1 text-xs text-slate-500">{item.device}</div><div className="text-xs text-slate-500">{item.resource}</div><div className="mt-1 text-xs text-slate-400">{item.time}</div></div>)}</CardContent></Card>
++      <Card><CardHeader><div><CardTitle>动作详情 <Badge tone="red">L3 高风险</Badge></CardTitle><div className="mt-1 text-xs text-slate-500">Request ID: REQ-20240518-000123</div></div></CardHeader><CardContent className="space-y-4"><div className="grid grid-cols-2 gap-3 text-sm xl:grid-cols-5"><div><span className="text-slate-500">Provider</span><b className="block">android_adb</b></div><div><span className="text-slate-500">Device</span><b className="block">{current.device}</b></div><div><span className="text-slate-500">Workflow</span><b className="block">E-commerce Bot</b></div><div><span className="text-slate-500">Requested By</span><b className="block">robot@provider</b></div><div><span className="text-slate-500">Time</span><b className="block">19:31:20</b></div></div><div className="grid grid-cols-1 gap-4 xl:grid-cols-2"><section className="rounded-xl border border-slate-100 p-3 text-sm"><b>触发原因</b><p className="mt-2 text-slate-500">Workflow step “Install App” requires installing external APK on device.</p><div className="mt-3"><b>策略命中</b><ul className="mt-2 space-y-1 text-red-600"><li>Policy: Block 3rd-party APK Install</li><li>Policy: Unknown App Source</li></ul></div></section><section><div className="mb-2 font-semibold">Action Payload JSON</div><pre className="rounded-2xl bg-slate-950 p-4 text-xs leading-6 text-slate-100">{`{
++  "provider":"android_adb",
++  "action":"install_apk",
++  "parameters":{
++    "apk_path":"/sdcard/Download/com.example.apk",
++    "grant_permissions":true
++  }
++}`}</pre></section></div><div><div className="mb-2 font-semibold">执行前截图</div><div className="flex h-56 items-center justify-center rounded-2xl bg-slate-900 text-slate-300">Android home screenshot</div></div><div className="flex flex-wrap gap-2"><Button variant="success"><ShieldCheck className="h-4 w-4" />批准</Button><Button variant="danger">拒绝</Button><Button>加入白名单</Button><Button>加入黑名单</Button></div></CardContent></Card>
++      <div className="space-y-4"><Card><CardHeader><CardTitle>风险解释</CardTitle></CardHeader><CardContent><div className="mx-auto flex h-28 w-28 items-center justify-center rounded-full border-[12px] border-red-200 text-center text-2xl font-bold text-red-600">92</div><div className="mt-4 grid gap-2 text-sm"><div className="flex justify-between"><span>Impact</span><b className="text-red-600">High</b></div><div className="flex justify-between"><span>Likelihood</span><b className="text-red-600">High</b></div><div className="flex justify-between"><span>Detectability</span><b className="text-amber-600">Low</b></div></div></CardContent></Card><Card><CardHeader><CardTitle>策略命中</CardTitle></CardHeader><CardContent className="space-y-2 text-sm">{["Block 3rd-party APK Install","Unknown App Source","Payment Amount Limit"].map((item)=><div key={item} className="rounded-xl bg-red-50 p-3 text-red-700"><ShieldAlert className="mr-2 inline h-4 w-4" />{item}</div>)}</CardContent></Card></div>
++      <Card className="2xl:col-span-3"><CardHeader><CardTitle>审批历史 / Policy Hit Timeline</CardTitle></CardHeader><CardContent className="grid grid-cols-1 gap-4 xl:grid-cols-2"><div className="space-y-2">{["Read Clipboard · Approved · Business justified","Read Contacts · Rejected · Privacy risk","Payment · Approved · Verified workflow"].map((row)=><div key={row} className="rounded-xl bg-slate-50 p-3 text-sm">{row}</div>)}</div><div className="space-y-2">{["19:31 Policy: Block 3rd-party APK Install","19:28 Policy: Payment Amount Limit","19:21 Policy: Contact Access Restriction"].map((row)=><div key={row} className="rounded-xl bg-slate-50 p-3 text-sm">{row}</div>)}</div></CardContent></Card>
++    </div>
++  );
++}
+diff -ruN oc_orig/pages/rpa/SettingsPage.tsx oc_work/pages/rpa/SettingsPage.tsx
+--- oc_orig/pages/rpa/SettingsPage.tsx	1970-01-01 00:00:00.000000000 +0000
++++ oc_work/pages/rpa/SettingsPage.tsx	2026-04-27 13:07:24.078112795 +0000
+@@ -0,0 +1,32 @@
++import type { ReactNode } from "react";
++
++import { Save, Settings2 } from "lucide-react";
++
++import { Button } from "../../components/ui/button";
++import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
++import { settingsSections } from "../../mock/rpaMultiPageMock";
++
++function Segmented({ options, active }: { options: string[]; active: string }) {
++  return (
++    <div className="grid rounded-xl border border-slate-200 bg-slate-50 p-1" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
++      {options.map((option) => <button key={option} className={`h-9 rounded-lg text-sm font-medium ${option === active ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>{option}</button>)}
++    </div>
++  );
++}
++
++function Toggle({ on = true }: { on?: boolean }) {
++  return <span className={`inline-flex h-6 w-11 items-center rounded-full p-0.5 ${on ? "bg-emerald-500" : "bg-slate-300"}`}><i className={`h-5 w-5 rounded-full bg-white transition ${on ? "translate-x-5" : "translate-x-0"}`} /></span>;
++}
++
++export function SettingsPage() {
++  return (
++    <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[280px_minmax(0,1fr)]">
++      <Card><CardContent className="space-y-2 p-4">{settingsSections.map((section,index)=><button key={section} className={`flex h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-medium ${index===0?"bg-blue-50 text-blue-700":"text-slate-600 hover:bg-slate-50"}`}><Settings2 className="h-4 w-4" />{section}</button>)}</CardContent></Card>
++      <Card><CardHeader><div><CardTitle>Provider Configuration</CardTitle><div className="mt-1 text-xs text-slate-500">Configure default behaviors and global policies for providers and execution.</div></div></CardHeader><CardContent className="divide-y divide-slate-100 p-0"><SettingRow title="Default Provider" desc="New workflows will use this provider by default."><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm"><option>android_adb (Android ADB)</option><option>windows_uia</option></select></SettingRow><SettingRow title="Default Screenshot Strategy" desc="Controls how screenshots are captured during execution."><Segmented options={["none","keyframe","full"]} active="keyframe" /></SettingRow><SettingRow title="OCR Engine" desc="OCR is used for text recognition in screenshots."><Segmented options={["disabled","paddleocr","other"]} active="disabled" /></SettingRow><SettingRow title="Default Safety Level" desc="Default risk level applied to new actions and workflows."><Segmented options={["low","medium","high"]} active="medium" /></SettingRow><SettingRow title="Auto-approve Low Risk Actions" desc="Automatically approve actions classified as low risk."><Toggle /></SettingRow><SettingRow title="Require Approval for L2+ Risk" desc="Require manual approval for Medium and High risk actions."><Toggle /></SettingRow><SettingRow title="Trace Retention" desc="How long to retain execution traces and artifacts."><Segmented options={["7天","30天","永久"]} active="30天" /></SettingRow><SettingRow title="Workflow Schema Version" desc="The default schema version used for new workflows."><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm"><option>1.0</option></select></SettingRow><SettingRow title="Enable Provider Health Check" desc="Periodically check provider connectivity and status."><Toggle /></SettingRow><SettingRow title="Mock Mode (Global)" desc="Force all providers into mock mode. No real device actions will be executed."><Toggle on={false} /></SettingRow><div className="flex flex-wrap items-center justify-between gap-3 p-4"><Button variant="primary"><Save className="h-4 w-4" />Save Changes</Button><div className="flex gap-2"><Button>Reset to Defaults</Button><Button>Export Config</Button></div></div></CardContent></Card>
++    </div>
++  );
++}
++
++function SettingRow({ title, desc, children }: { title: string; desc: string; children: ReactNode }) {
++  return <div className="grid grid-cols-1 gap-3 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,480px)]"><div><div className="font-semibold text-slate-900">{title}</div><div className="mt-1 text-sm text-slate-500">{desc}</div></div><div>{children}</div></div>;
++}
+diff -ruN oc_orig/pages/rpa/SkillBuilderPage.tsx oc_work/pages/rpa/SkillBuilderPage.tsx
+--- oc_orig/pages/rpa/SkillBuilderPage.tsx	1970-01-01 00:00:00.000000000 +0000
++++ oc_work/pages/rpa/SkillBuilderPage.tsx	2026-04-27 13:06:17.406290972 +0000
+@@ -0,0 +1,39 @@
++import { CheckCircle2, GitBranch, Play, Save, UploadCloud } from "lucide-react";
++
++import { Badge } from "../../components/ui/badge";
++import { Button } from "../../components/ui/button";
++import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
++import { skillGroups, skillSources } from "../../mock/rpaMultiPageMock";
++
++const yaml = `name: taobao_search_product
++version: 1.0.0
++description: 在淘宝搜索商品并浏览结果
++provider: android_adb
++mode: mock
++capabilities:
++  - tap
++  - input_text
++  - scroll
++  - wait
++input_parameters:
++  search_input:
++    type: string
++    description: 搜索关键词
++    required: true
++  category:
++    type: string
++    required: false`;
++
++export function SkillBuilderPage() {
++  return (
++    <div className="space-y-4">
++      <Card className="p-4"><div className="grid grid-cols-1 gap-3 md:grid-cols-4">{[["1 Trace","选择执行轨迹"],["2 Workflow","抽取并压缩流程"],["3 Skill","生成可复用技能"],["4 Reuse","发布与复用"]].map(([title,desc],index)=><div key={title} className="flex items-center gap-3"><div className={`flex h-10 w-10 items-center justify-center rounded-full ${index===0?"bg-blue-600 text-white":"bg-slate-100 text-slate-500"}`}>{index+1}</div><div><div className="font-semibold text-slate-900">{title}</div><div className="text-xs text-slate-500">{desc}</div></div></div>)}</div></Card>
++      <section className="grid grid-cols-1 gap-4 2xl:grid-cols-[300px_minmax(0,1fr)_460px]">
++        <Card><CardHeader><CardTitle>来源选择</CardTitle></CardHeader><CardContent className="space-y-3"><div className="grid grid-cols-2 gap-2"><Button variant="primary">Trace (128)</Button><Button>Workflow (34)</Button></div>{skillSources.map((item,index)=><div key={item.id} className={`rounded-xl border p-3 ${index===0?"border-blue-200 bg-blue-50":"border-slate-100"}`}><div className="flex items-center justify-between"><div className="font-semibold text-slate-900">{item.title}</div><Badge tone={item.status==="partial"?"orange":"green"}>{item.status}</Badge></div><div className="mt-1 text-xs text-slate-500">{item.id}</div><div className="text-xs text-slate-500">{item.provider}</div></div>)}</CardContent></Card>
++        <Card><CardHeader><CardTitle>参数抽取与步骤压缩</CardTitle><Badge tone="blue">128 steps detected</Badge></CardHeader><CardContent className="space-y-5"><section><div className="mb-3 flex items-center gap-2 font-semibold"><CheckCircle2 className="h-4 w-4 text-blue-600" />Input Parameter Extraction</div><div className="grid grid-cols-1 gap-2 md:grid-cols-2">{["search_input · string · 手机充电器","sort_type · string · 综合","category · string · 全部","brand_filter · string · 全部","page_index · integer · 1","max_price · number · 未设置"].map((param)=><div key={param} className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-sm">{param}</div>)}</div></section><section><div className="mb-3 flex items-center gap-2 font-semibold"><GitBranch className="h-4 w-4 text-blue-600" />Step Grouping & Normalization</div><div className="space-y-2">{skillGroups.map((group)=><div key={group.id} className="flex items-center gap-3 rounded-xl border border-slate-100 p-3 text-sm"><Badge tone="blue">{group.id}</Badge><span className="min-w-0 flex-1 truncate">{group.name}</span><span className="text-slate-500">{group.from} → {group.to}</span><span className="font-semibold text-emerald-600">-{group.saved}</span></div>)}</div></section><section><div className="mb-2 font-semibold">Compression Controls</div><div className="h-2 rounded-full bg-slate-100"><div className="h-2 w-[78%] rounded-full bg-blue-600" /></div><div className="mt-2 text-sm text-slate-500">当前压缩率 78% · Aggressive</div></section></CardContent></Card>
++        <Card><CardHeader><CardTitle>Skill YAML / JSON 预览</CardTitle><div className="flex gap-1"><Badge tone="blue">YAML</Badge><Badge>JSON</Badge></div></CardHeader><CardContent><pre className="max-h-[430px] overflow-auto rounded-2xl bg-slate-950 p-4 text-xs leading-6 text-slate-100"><code>{yaml}</code></pre><div className="mt-4 grid grid-cols-2 gap-3 text-sm"><div><div className="text-slate-500">技能名称</div><b>taobao_search_product</b></div><div><div className="text-slate-500">版本</div><b>1.0.0 draft</b></div><div><div className="text-slate-500">兼容设备</div><b>12 / 18 在线</b></div><div><div className="text-slate-500">成功率</div><b>98.2%</b></div></div></CardContent></Card>
++      </section>
++      <section className="grid grid-cols-1 gap-4 2xl:grid-cols-[1fr_1fr_420px]"><Card><CardHeader><CardTitle>测试运行结果</CardTitle><Badge tone="green">成功</Badge></CardHeader><CardContent><div className="grid grid-cols-4 gap-2 text-center"><div><b>00:24.31</b><div className="text-xs text-slate-500">执行时长</div></div><div><b>10/10</b><div className="text-xs text-slate-500">步骤执行</div></div><div><b>100%</b><div className="text-xs text-slate-500">成功率</div></div><div><b>0</b><div className="text-xs text-slate-500">错误数</div></div></div></CardContent></Card><Card><CardHeader><CardTitle>版本时间线</CardTitle></CardHeader><CardContent className="space-y-2 text-sm"><div className="rounded-xl bg-blue-50 p-3">v1.0.0 draft · 初始版本生成</div><div className="rounded-xl bg-slate-50 p-3">v0.3.0 · 调整分组策略</div><div className="rounded-xl bg-slate-50 p-3">v0.2.0 · 从 Trace 生成草稿</div></CardContent></Card><Card><CardHeader><CardTitle>Actions</CardTitle></CardHeader><CardContent className="grid gap-3"><Button variant="primary"><Play className="h-4 w-4" />Test Run</Button><Button><Save className="h-4 w-4" />Save Draft</Button><Button variant="success"><UploadCloud className="h-4 w-4" />Publish Skill</Button></CardContent></Card></section>
++    </div>
++  );
++}
+diff -ruN oc_orig/pages/rpa/TraceReplayPage.tsx oc_work/pages/rpa/TraceReplayPage.tsx
+--- oc_orig/pages/rpa/TraceReplayPage.tsx	1970-01-01 00:00:00.000000000 +0000
++++ oc_work/pages/rpa/TraceReplayPage.tsx	2026-04-27 13:07:58.817921178 +0000
+@@ -0,0 +1,22 @@
++import { AlertCircle, Camera, Play, Search } from "lucide-react";
++
++import { Badge } from "../../components/ui/badge";
++import { Button } from "../../components/ui/button";
++import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
++import { traceList, traceReplaySteps } from "../../mock/rpaMultiPageMock";
++
++type BadgeTone = "blue" | "green" | "orange" | "red" | "slate";
++
++function tone(status: string): BadgeTone {
++  return status === "failed" ? "red" : status === "success" ? "green" : status === "partial" || status === "skipped" ? "orange" : "blue";
++}
++
++export function TraceReplayPage() {
++  return (
++    <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[300px_minmax(0,1fr)_360px]">
++      <Card><CardHeader><CardTitle>Trace 搜索与过滤</CardTitle></CardHeader><CardContent className="space-y-3"><div className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-3 text-sm text-slate-400"><Search className="h-4 w-4" />搜索 task_id / workflow / step</div>{["task_id","workflow_id","provider","status","time range"].map((field)=><input key={field} className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" placeholder={field}/>) }<div className="pt-2 text-sm text-slate-500">78 traces found</div>{traceList.map((item,index)=><div key={item.id} className={`rounded-xl border p-3 ${index===0?"border-blue-200 bg-blue-50":"border-slate-100"}`}><div className="flex items-center justify-between"><b className="text-slate-900">{item.id}</b><Badge tone={tone(item.status)}>{item.status}</Badge></div><div className="mt-1 text-xs text-slate-500">{item.workflow}</div><div className="text-xs text-slate-500">{item.note}</div></div>)}</CardContent></Card>
++      <div className="space-y-4"><Card><CardHeader><div><CardTitle>task_20240522_0017 <Badge tone="red">failed</Badge></CardTitle><div className="mt-1 text-xs text-slate-500">workflow wf_taobao_search · provider android_adb · duration 00:02:18.732</div></div></CardHeader><CardContent><div className="space-y-3">{traceReplaySteps.map((step)=><div key={step.step} className={`grid grid-cols-[80px_36px_minmax(0,1fr)_90px] items-center gap-3 rounded-xl border p-3 ${step.status==="failed"?"border-red-200 bg-red-50":"border-slate-100"}`}><span className="text-xs text-slate-500">{step.time}</span><span className={`flex h-8 w-8 items-center justify-center rounded-full ${step.status==="failed"?"bg-red-100 text-red-700":"bg-emerald-100 text-emerald-700"}`}>{step.step}</span><div><b className="text-slate-900">{step.title}</b><div className="text-xs text-slate-500">{step.action}</div></div><Badge tone={tone(step.status)}>{step.status}</Badge></div>)}</div><div className="mt-5 flex items-center gap-3"><Button variant="primary" size="icon"><Play className="h-4 w-4" /></Button><div className="h-2 flex-1 rounded-full bg-slate-100"><div className="h-2 w-[31%] rounded-full bg-red-500" /></div><span className="text-sm text-slate-500">00:31.114 / 02:18.732</span></div></CardContent></Card><section className="grid grid-cols-1 gap-4 xl:grid-cols-3"><Card><CardHeader><CardTitle>截图查看</CardTitle></CardHeader><CardContent><div className="flex h-48 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-50 to-blue-50 text-sm text-slate-500"><Camera className="mr-2 h-5 w-5" />tap_before.png</div></CardContent></Card><Card><CardHeader><CardTitle>结构化 JSON</CardTitle></CardHeader><CardContent><pre className="h-48 overflow-auto rounded-2xl bg-slate-950 p-3 text-xs text-slate-100">{`{\n  "stepId": "Step 04",\n  "action": "tap",\n  "target": "search_button",\n  "risk": "L2"\n}`}</pre></CardContent></Card><Card><CardHeader><CardTitle>错误详情</CardTitle></CardHeader><CardContent className="text-sm"><b>ELEMENT_NOT_FOUND</b><p className="mt-2 text-slate-500">LocatorResolutionError · id=search_button 不存在</p></CardContent></Card></section></div>
++      <Card><CardHeader><CardTitle>Step Inspector</CardTitle><Badge tone="red">Step 04</Badge></CardHeader><CardContent className="space-y-4"><section><div className="mb-2 font-semibold">Action JSON</div><pre className="rounded-2xl bg-slate-950 p-3 text-xs text-slate-100">{`{\n "type":"tap",\n "target":"search_button",\n "coordinates":{"x":958,"y":1834}\n}`}</pre></section><section className="rounded-xl bg-red-50 p-3 text-sm text-red-700"><AlertCircle className="mb-2 h-4 w-4" />Safety Result: blocked · L2 manual confirm required</section><section><div className="font-semibold">失败原因分析</div><p className="mt-2 text-sm text-slate-500">当前页面结构已变更，元素 id 不存在，相似元素匹配度 0.42。</p></section><Button variant="primary" className="w-full">转为 Workflow</Button><Button className="w-full">生成修复建议</Button></CardContent></Card>
++    </div>
++  );
++}
+diff -ruN oc_orig/pages/rpa/WorkflowLibraryPage.tsx oc_work/pages/rpa/WorkflowLibraryPage.tsx
+--- oc_orig/pages/rpa/WorkflowLibraryPage.tsx	1970-01-01 00:00:00.000000000 +0000
++++ oc_work/pages/rpa/WorkflowLibraryPage.tsx	2026-04-27 13:06:17.405887647 +0000
+@@ -0,0 +1,57 @@
++import { Code2, Download, History, Play, Search } from "lucide-react";
++
++import { Badge } from "../../components/ui/badge";
++import { Button } from "../../components/ui/button";
++import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
++import { workflowAssets, workflowRuns } from "../../mock/rpaMultiPageMock";
++
++const workflowJson = `{
++  "name": "淘宝搜索商品流程",
++  "version": "3",
++  "schema_version": "1.1.3",
++  "provider": "android_adb",
++  "platform": "android",
++  "description": "在淘宝 APP 中搜索商品并返回结果列表",
++  "steps": [
++    { "id": "Step 01", "action": "observe", "target": "home_screen", "timeout": 5000 },
++    { "id": "Step 02", "action": "tap", "target": "search_input", "timeout": 3000 }
++  ]
++}`;
++
++export function WorkflowLibraryPage() {
++  return (
++    <div className="space-y-4">
++      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-4">
++        {[["Total Workflows","34","All reusable workflow assets"],["Validated","22","64.7% of total"],["Drafts","8","Pending validation"],["Avg Success Rate","98.3%","Last 30 days"]].map(([title,value,note]) => (
++          <Card key={title} className="p-4"><div className="text-sm text-slate-500">{title}</div><div className="mt-2 text-3xl font-semibold text-slate-950">{value}</div><div className="mt-1 text-xs text-slate-500">{note}</div></Card>
++        ))}
++      </section>
++      <section className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(0,1fr)_520px]">
++        <Card>
++          <CardHeader className="flex-wrap"><CardTitle>Workflow 资产表</CardTitle><Button variant="primary" size="sm">+ New Workflow</Button></CardHeader>
++          <CardContent>
++            <div className="mb-3 flex flex-wrap gap-2"><div className="flex h-10 min-w-[260px] flex-1 items-center gap-2 rounded-xl border border-slate-200 px-3 text-sm text-slate-400"><Search className="h-4 w-4" />搜索工作流名称、描述、标签...</div><Button size="sm">Provider: android_adb</Button><Button size="sm">Platform: All</Button><Button size="sm">Status: All</Button></div>
++            <div className="overflow-x-auto rounded-xl border border-slate-100">
++              <table className="min-w-[940px] w-full text-left text-sm">
++                <thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="px-3 py-3">Workflow</th><th>Schema</th><th>Provider</th><th>Platform</th><th>Steps</th><th>成功率</th><th>最近运行</th><th>状态</th><th>操作</th></tr></thead>
++                <tbody className="divide-y divide-slate-100">
++                  {workflowAssets.map((item, index) => (
++                    <tr key={item.name} className={index === 0 ? "bg-blue-50/50" : ""}>
++                      <td className="px-3 py-3"><div className="font-semibold text-slate-900">{item.name}</div><div className="text-xs text-slate-500">可复用 workflow.json</div></td><td>{item.schema}</td><td>{item.provider}</td><td>{item.platform}</td><td>{item.steps}</td><td className="text-emerald-600">{item.success}</td><td>{item.lastRun}</td><td><Badge tone={item.status === "draft" ? "orange" : "green"}>{item.status}</Badge></td>
++                      <td><div className="flex gap-1"><Button size="icon" variant="primary"><Play className="h-4 w-4" /></Button><Button size="icon"><Code2 className="h-4 w-4" /></Button><Button size="icon"><History className="h-4 w-4" /></Button></div></td>
++                    </tr>
++                  ))}
++                </tbody>
++              </table>
++            </div>
++          </CardContent>
++        </Card>
++        <Card>
++          <CardHeader><div><CardTitle>淘宝搜索商品流程 <Badge tone="green">ready</Badge></CardTitle><div className="mt-1 text-xs text-slate-500">Provider android_adb · Schema 1.1.3 · 17 steps</div></div><Button size="icon"><Download className="h-4 w-4" /></Button></CardHeader>
++          <CardContent><div className="mb-3 flex gap-2 text-xs"><Badge tone="blue">Workflow JSON</Badge><Badge>Manifest</Badge><Badge>Metadata</Badge></div><pre className="max-h-[420px] overflow-auto rounded-2xl bg-slate-950 p-4 text-xs leading-6 text-slate-100"><code>{workflowJson}</code></pre><div className="mt-3 flex items-center justify-between"><span className="text-sm text-emerald-600">Schema Valid · Last validated 19:31:20</span><Button variant="primary" size="sm">Validate</Button></div></CardContent>
++        </Card>
++      </section>
++      <Card><CardHeader><CardTitle>运行记录 / 版本记录</CardTitle></CardHeader><CardContent className="grid grid-cols-1 gap-4 2xl:grid-cols-2"><div className="overflow-x-auto"><table className="min-w-[620px] w-full text-left text-sm"><thead className="text-xs text-slate-500"><tr><th>Run ID</th><th>By</th><th>Env</th><th>Steps</th><th>Result</th><th>Rate</th><th>Duration</th></tr></thead><tbody className="divide-y divide-slate-100">{workflowRuns.map((run) => <tr key={run.run}><td className="py-3 font-medium text-blue-600">{run.run}</td><td>{run.by}</td><td>{run.env}</td><td>{run.steps}</td><td><Badge tone={run.result === "partial" ? "orange" : "green"}>{run.result}</Badge></td><td>{run.rate}</td><td>{run.duration}</td></tr>)}</tbody></table></div><div className="space-y-3">{["v3 · Add screenshot after search results","v2 · Adjust search_input selector","v1 · Initial version"].map((item) => <div key={item} className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-sm">{item}</div>)}</div></CardContent></Card>
++    </div>
++  );
++}
+diff -ruN oc_orig/styles.css oc_work/styles.css
+--- oc_orig/styles.css	2026-04-27 19:20:10.000000000 +0000
++++ oc_work/styles.css	2026-04-27 12:02:30.638710191 +0000
+@@ -19,9 +19,16 @@
+   box-sizing: border-box;
+ }
+ 
++html,
++body,
++#root {
++  height: 100%;
++  min-width: 0;
++}
++
+ body {
+   margin: 0;
+-  min-width: 1180px;
++  overflow: hidden;
+   background: hsl(var(--background));
+   color: hsl(var(--foreground));
+   font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+@@ -31,6 +38,7 @@
+ input,
+ select,
+ textarea {
++  min-width: 0;
+   font: inherit;
+ }
+ 
+@@ -43,7 +51,15 @@
+ }
+ 
+ .panel {
+-  @apply rounded-2xl border border-slate-200 bg-white shadow-card;
++  @apply min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card;
++}
++
++.rpa-page-grid {
++  @apply grid grid-cols-1 gap-4;
++}
++
++.kpi-grid > * {
++  height: 100%;
+ }
+ 
+ .subtle-grid {

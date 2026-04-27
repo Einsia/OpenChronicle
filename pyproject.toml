@@ -12,6 +12,7 @@ classifiers = [
     "Environment :: Console",
     "License :: OSI Approved :: MIT License",
     "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -26,6 +27,7 @@ dependencies = [
     "Pillow>=10.0",
     "mcp>=1.0",
     "httpx[socks]>=0.27",
+    "uiautomation>=2.0; platform_system == 'Windows'",
     "tomli>=2.0; python_version < '3.11'",
 ]
 

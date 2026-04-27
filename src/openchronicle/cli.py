@@ -916,10 +916,19 @@ def rebuild_captures_index() -> None:
     _init()
     buf = paths.capture_buffer_dir()
     if not buf.exists():
+        with fts.cursor() as conn:
+            conn.execute("DELETE FROM captures")
         console.print("[yellow]No capture-buffer directory; nothing to rebuild.[/yellow]")
         return
 
     files = sorted(p for p in buf.iterdir() if p.is_file() and p.suffix == ".json")
+    file_ids = {p.stem for p in files}
+    with fts.cursor() as conn:
+        rows = conn.execute("SELECT id FROM captures").fetchall()
+        for row in rows:
+            if row["id"] not in file_ids:
+                fts.delete_capture(conn, row["id"])
+
     if not files:
         console.print("[yellow]capture-buffer is empty; nothing to rebuild.[/yellow]")
         return
@@ -994,11 +1003,17 @@ def _clean_captures() -> int:
     buf = paths.capture_buffer_dir()
     if not buf.exists():
         return 0
+    removed_stems: list[str] = []
     n = 0
     for p in buf.iterdir():
         if p.suffix == ".json" and p.is_file():
             p.unlink()
+            removed_stems.append(p.stem)
             n += 1
+    if removed_stems:
+        with fts.cursor() as conn:
+            for stem in removed_stems:
+                fts.delete_capture(conn, stem)
     return n
 
 

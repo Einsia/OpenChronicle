@@ -18,6 +18,14 @@ class ModelConfig:
     api_key: str = ""
     api_key_env: str = "OPENAI_API_KEY"
     max_tokens: int | None = None
+    # Per-call timeout in seconds. ``None`` falls back to the writer
+    # default (writer.llm.DEFAULT_TIMEOUT_SECONDS) so a hung connection
+    # can never block a reducer / classifier thread indefinitely.
+    timeout_seconds: int | None = None
+    # Number of automatic retries on transient failures (429s, network
+    # blips). ``None`` falls back to writer.llm.DEFAULT_NUM_RETRIES.
+    # litellm honors Retry-After headers between attempts.
+    num_retries: int | None = None
 
 
 @dataclass
@@ -207,6 +215,8 @@ model = "gpt-5.4-nano"
 api_key_env = "OPENAI_API_KEY"
 # base_url = ""
 # api_key = ""          # overrides api_key_env if set
+# timeout_seconds = 120 # per-call timeout; raise this if you run a slow local model
+# num_retries = 2       # automatic retries on transient errors (429, network blips)
 
 [models.compact]
 # Accuracy-sensitive — match or exceed the default.

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-
-import pytest
 
 from openchronicle import config as config_mod
 from openchronicle import paths
@@ -14,7 +12,6 @@ from openchronicle.store import entries as entries_mod
 from openchronicle.store import fts
 from openchronicle.writer import classifier as classifier_mod
 from openchronicle.writer import llm as llm_mod
-
 
 _TZ = timezone(timedelta(hours=8))
 
@@ -94,11 +91,11 @@ def test_classifier_appends_durable_preference(ac_root: Path, monkeypatch) -> No
     assert "Cursor-over-VSCode" in result.summary
 
     # Event-daily was NOT modified.
-    evt = (paths.memory_dir() / name).read_text()
+    evt = (paths.memory_dir() / name).read_text(encoding="utf-8")
     assert evt.count("**Session sess_abc**") == 1
 
     # user-preferences.md got the new entry.
-    pref = (paths.memory_dir() / "user-preferences.md").read_text()
+    pref = (paths.memory_dir() / "user-preferences.md").read_text(encoding="utf-8")
     assert "Cursor over VSCode" in pref
 
 

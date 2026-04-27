@@ -4,15 +4,12 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import pytest
-
 from openchronicle import config as config_mod
 from openchronicle import paths
 from openchronicle.session import store as session_store
 from openchronicle.store import fts
 from openchronicle.timeline import store as timeline_store
 from openchronicle.writer import session_reducer
-
 
 _TZ = timezone(timedelta(hours=8))
 _SID = "sess_test0000"
@@ -91,7 +88,7 @@ def test_reducer_happy_path_writes_event_daily(ac_root: Path, monkeypatch) -> No
     assert result.path == "event-2026-04-21.md"
     assert len(result.sub_tasks) == 1
 
-    md = (paths.memory_dir() / "event-2026-04-21.md").read_text()
+    md = (paths.memory_dir() / "event-2026-04-21.md").read_text(encoding="utf-8")
     assert "Session sess_test0000" in md
     assert "[10:00-10:15, Cursor]" in md
     assert "file_0.py" in md
@@ -191,7 +188,7 @@ def test_reducer_exhausted_retries_writes_heuristic(ac_root: Path, monkeypatch) 
 
     assert result.succeeded is False
     assert result.written is True
-    md = (paths.memory_dir() / "event-2026-04-21.md").read_text()
+    md = (paths.memory_dir() / "event-2026-04-21.md").read_text(encoding="utf-8")
     assert "Cursor" in md
     assert "heuristic" in md  # tag should be present on the heading
 
@@ -260,7 +257,7 @@ def test_flush_active_session_writes_partial_entry(
     assert result.is_final is False
     assert result.written is True
 
-    md = (paths.memory_dir() / "event-2026-04-21.md").read_text()
+    md = (paths.memory_dir() / "event-2026-04-21.md").read_text(encoding="utf-8")
     assert "Session sess_flush1 [flush]" in md
 
     with fts.cursor() as conn:
@@ -322,7 +319,7 @@ def test_terminal_reduce_after_flush_covers_trailing_window(
     assert result.written is True
     assert result.is_final is True
 
-    md = (paths.memory_dir() / "event-2026-04-21.md").read_text()
+    md = (paths.memory_dir() / "event-2026-04-21.md").read_text(encoding="utf-8")
     # The terminal entry is NOT tagged as flush.
     assert "Session sess_flush2 [flush]" not in md
     assert "Session sess_flush2" in md

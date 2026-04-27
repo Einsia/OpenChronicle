@@ -155,6 +155,9 @@ def test_atomic_write_preserves_existing_permissions(tmp_path: Path) -> None:
     chmod the rename would replace a user's 0o644 file with a 0o600
     one, a hidden behavior change from ``Path.write_text``.
     """
+    if os.name == "nt":
+        pytest.skip("POSIX permission bits are not stable on Windows")
+
     target = tmp_path / "memory.md"
     target.write_text("original")
     target.chmod(0o644)

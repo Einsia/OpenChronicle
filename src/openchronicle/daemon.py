@@ -50,7 +50,7 @@ async def _mcp_loop(cfg: Config) -> None:
 
 async def _run(cfg: Config, *, capture_only: bool = False) -> None:
     paths.ensure_dirs()
-    paths.pid_file().write_text(str(os.getpid()))
+    paths.pid_file().write_text(str(os.getpid()), encoding="utf-8")
 
     # SessionManager observes every capture-worthy event and fires the
     # reducer via its on_session_end callback. Built even when

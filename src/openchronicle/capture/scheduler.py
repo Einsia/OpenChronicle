@@ -50,6 +50,80 @@ def _public_trigger(trigger: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _resolve_window_meta(
+    primary: dict[str, str],
+    ax_tree: dict[str, Any] | None,
+    trigger: dict[str, Any] | None,
+) -> dict[str, str]:
+    """Backfill empty ``window_meta`` fields from authoritative secondaries.
+
+    The primary source — ``window_meta.active_window()`` — calls
+    ``GetForegroundWindow`` on Windows. From a session-isolated daemon
+    worker thread (a known ConPTY edge case) that returns 0, leaving the
+    capture's ``window_meta`` empty even when the AX helper *did*
+    successfully introspect the same window via the anchored HWND/PID.
+    Downstream stages then surface the missing app name as ``Unknown``.
+
+    Two ranked fallbacks fill the gap, mirroring the data the macOS
+    osascript path would have produced:
+
+    1. **AX tree's frontmost app** — the helper was invoked with the
+       watcher's anchor hwnd/pid, so its ``apps[].name`` /
+       ``apps[].bundle_id`` / ``windows[].title`` describe exactly the
+       window the user was on at capture time.
+    2. **Watcher trigger** — what `WinEventHook` saw when the event
+       fired. Used last because the hwnd may have changed in the few ms
+       before `_build_capture` ran. ``app_name`` is derived from
+       ``bundle_id`` (the executable path) since the trigger schema
+       intentionally has no app_name field.
+
+    Mac never hits the fallbacks because ``osascript`` is reliable when
+    AX permission is granted, but the function is platform-agnostic so
+    behaviour stays uniform.
+    """
+    out = dict(primary)
+
+    ax_app: dict[str, Any] | None = None
+    ax_window: dict[str, Any] | None = None
+    if isinstance(ax_tree, dict):
+        apps = ax_tree.get("apps") or []
+        for app in apps:
+            if app.get("is_frontmost"):
+                ax_app = app
+                break
+        if ax_app is None and apps:
+            ax_app = apps[0]
+        if ax_app is not None:
+            windows = ax_app.get("windows") or []
+            for w in windows:
+                if w.get("focused"):
+                    ax_window = w
+                    break
+            if ax_window is None and windows:
+                ax_window = windows[0]
+
+    if not out.get("app_name"):
+        if ax_app and ax_app.get("name"):
+            out["app_name"] = str(ax_app["name"])
+        elif trigger and trigger.get("bundle_id"):
+            # Trigger has no app_name; derive it from the exe path's stem.
+            out["app_name"] = Path(str(trigger["bundle_id"])).stem
+
+    if not out.get("title"):
+        if ax_window and ax_window.get("title"):
+            out["title"] = str(ax_window["title"])
+        elif trigger and trigger.get("window_title"):
+            out["title"] = str(trigger["window_title"])
+
+    if not out.get("bundle_id"):
+        if ax_app and ax_app.get("bundle_id"):
+            out["bundle_id"] = str(ax_app["bundle_id"])
+        elif trigger and trigger.get("bundle_id"):
+            out["bundle_id"] = str(trigger["bundle_id"])
+
+    return out
+
+
 def _build_capture(
     cfg: CaptureConfig,
     provider: ax_capture.AXProvider,
@@ -107,6 +181,13 @@ def _build_capture(
                 "width": shot.width,
                 "height": shot.height,
             }
+
+    # Backfill empty window_meta fields from the AX tree / trigger so a
+    # GetForegroundWindow hiccup on Windows doesn't surface downstream as
+    # "Unknown". See _resolve_window_meta for ranking + rationale.
+    out["window_meta"] = _resolve_window_meta(
+        out["window_meta"], out.get("ax_tree"), trigger,
+    )
 
     s1_parser.enrich(out, trigger=trigger)
     return out

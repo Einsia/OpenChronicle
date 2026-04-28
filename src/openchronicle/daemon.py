@@ -4,13 +4,18 @@ The v2 writer is driven by session boundaries. ``SessionManager.on_session_end``
 (wired in ``session/tick.py``) spawns the S2 reducer on a daemon thread, and
 the reducer's success callback kicks the classifier. No periodic writer loop
 is needed — each session produces exactly one reducer + classifier pass.
+
+Can also be invoked directly via ``python -m openchronicle.daemon`` (used by
+the Windows background launcher in cli.py).
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import platform
 import signal
+import sys
 from contextlib import suppress
 
 from . import paths
@@ -21,6 +26,8 @@ from .session import tick as session_tick
 from .timeline import tick as timeline_tick
 
 logger = get("openchronicle.daemon")
+
+_IS_WINDOWS = platform.system() == "Windows"
 
 
 async def _mcp_loop(cfg: Config) -> None:
@@ -95,9 +102,14 @@ async def _run(cfg: Config, *, capture_only: bool = False) -> None:
         stop.set()
 
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        with suppress(NotImplementedError):
-            loop.add_signal_handler(sig, _handle_stop)
+    if _IS_WINDOWS:
+        # Windows does not support add_signal_handler; use signal.signal instead
+        signal.signal(signal.SIGINT, lambda *_: loop.call_soon_threadsafe(_handle_stop))
+        signal.signal(signal.SIGTERM, lambda *_: loop.call_soon_threadsafe(_handle_stop))
+    else:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            with suppress(NotImplementedError):
+                loop.add_signal_handler(sig, _handle_stop)
 
     done_task = asyncio.create_task(stop.wait())
     await asyncio.wait(
@@ -123,3 +135,15 @@ async def _run(cfg: Config, *, capture_only: bool = False) -> None:
 
 def run(cfg: Config, *, capture_only: bool = False) -> None:
     asyncio.run(_run(cfg, capture_only=capture_only))
+
+
+if __name__ == "__main__":
+    from . import config as config_mod
+    from . import logger as logger_mod
+
+    paths.ensure_dirs()
+    config_mod.write_default_if_missing()
+    logger_mod.setup(console=False)
+    cfg = config_mod.load()
+    capture_only = "--capture-only" in sys.argv
+    run(cfg, capture_only=capture_only)

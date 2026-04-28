@@ -23,7 +23,7 @@ class ModelConfig:
 @dataclass
 class CaptureConfig:
     # Event-driven capture knobs
-    event_driven: bool = True  # consume mac-ax-watcher events
+    event_driven: bool = True  # consume AX/UIA watcher events (cross-platform)
     heartbeat_minutes: int = 10  # periodic capture even without events
     debounce_seconds: float = 3.0  # for AXValueChanged bursts
     min_capture_gap_seconds: float = 2.0  # between consecutive captures
@@ -228,7 +228,7 @@ api_key_env = "OPENAI_API_KEY"
 # Accuracy-sensitive — pick a capable model.
 
 [capture]
-event_driven = true           # capture on window/app/typing events via mac-ax-watcher
+event_driven = true           # capture on window/app/typing events (macOS: AX watcher, Windows: SetWinEventHook)
 heartbeat_minutes = 10        # periodic capture even when nothing happens
 debounce_seconds = 3.0        # for AXValueChanged bursts
 min_capture_gap_seconds = 2.0 # minimum gap between consecutive captures
@@ -240,7 +240,7 @@ buffer_max_mb = 2000                   # hard ceiling; oldest absorbed files evi
 include_screenshot = true
 screenshot_max_width = 1920
 screenshot_jpeg_quality = 80
-ax_depth = 100                # Electron apps (Claude Desktop, VS Code, Slack) have deep DOM; 8 only reaches the chrome
+ax_depth = 100                # Electron apps have deep DOM; 8 only reaches the chrome (macOS: AX tree, Windows: UIA tree)
 ax_timeout_seconds = 3
 
 [timeline]

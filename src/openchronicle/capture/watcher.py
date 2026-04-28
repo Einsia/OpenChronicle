@@ -1,11 +1,12 @@
-"""Long-running AX event watcher subprocess manager.
+"""Long-running event watcher — cross-platform.
 
-Wraps the vendored ``mac-ax-watcher`` Swift binary. Reads JSONL events from
-stdout and dispatches them through a registered callback. Reconnects on
-crash with exponential backoff.
+macOS: vendored ``mac-ax-watcher`` Swift binary (subprocess, JSONL on stdout)
+Windows: in-process thread using SetWinEventHook + low-level input hooks
 
-Ported from Einsia-Partner's backend/core/memory/watcher.py — path resolution
-adapted to OpenChronicle's bundled-resource layout (mirrors ax_capture.py).
+Both implementations share the same public interface:
+  .available, .running, .on_event(callback), .start(), .stop()
+
+Use ``create_watcher()`` to get the right implementation for the current OS.
 """
 
 from __future__ import annotations
@@ -18,12 +19,28 @@ import subprocess
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from ..logger import get
 from .ax_capture import _maybe_compile
 
 logger = get("openchronicle.capture")
+
+
+class EventWatcher(Protocol):
+    """Common interface implemented by both macOS and Windows watchers."""
+
+    @property
+    def available(self) -> bool: ...
+
+    @property
+    def running(self) -> bool: ...
+
+    def on_event(self, callback: Callable[[dict[str, Any]], None]) -> None: ...
+
+    def start(self) -> None: ...
+
+    def stop(self, *, join_timeout: float = 5.0) -> None: ...
 
 
 def _resolve_watcher_path() -> Path | None:
@@ -200,3 +217,16 @@ class AXWatcherProcess:
                 self._stop_event.set()
             elif rc != 0:
                 logger.warning("AX watcher exited with code %d", rc)
+
+
+def create_watcher() -> EventWatcher:
+    """Factory: return the appropriate watcher for the current platform."""
+    system = platform.system()
+    if system == "Darwin":
+        return AXWatcherProcess()
+    if system == "Windows":
+        from .win_watcher import WinWatcherThread
+
+        return WinWatcherThread()
+    logger.warning("No event watcher available for platform: %s", system)
+    return AXWatcherProcess()  # will be unavailable on non-Darwin

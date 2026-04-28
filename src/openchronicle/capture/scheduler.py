@@ -20,7 +20,7 @@ from ..logger import get
 from ..store import fts as fts_store
 from . import ax_capture, s1_parser, screenshot, window_meta
 from .event_dispatcher import EventDispatcher
-from .watcher import AXWatcherProcess
+from .watcher import EventWatcher, create_watcher
 
 logger = get("openchronicle.capture")
 
@@ -31,6 +31,97 @@ def _now_iso() -> str:
 
 def _safe_filename(ts: str) -> str:
     return ts.replace(":", "-").replace("+", "p")
+
+
+def _public_trigger(trigger: dict[str, Any] | None) -> dict[str, Any]:
+    """Return the schema-stable trigger fields suitable for capture.json.
+
+    Internal-only hints (windows HWND, PID — used to anchor the helper
+    subprocess) live on the trigger dict for plumbing convenience but
+    must not leak into the persisted JSON, otherwise the on-disk schema
+    diverges between mac and Windows.
+    """
+    if not trigger:
+        return {"event_type": "heartbeat"}
+    return {
+        "event_type": trigger.get("event_type", ""),
+        "bundle_id": trigger.get("bundle_id", ""),
+        "window_title": trigger.get("window_title", ""),
+    }
+
+
+def _resolve_window_meta(
+    primary: dict[str, str],
+    ax_tree: dict[str, Any] | None,
+    trigger: dict[str, Any] | None,
+) -> dict[str, str]:
+    """Backfill empty ``window_meta`` fields from authoritative secondaries.
+
+    The primary source — ``window_meta.active_window()`` — calls
+    ``GetForegroundWindow`` on Windows. From a session-isolated daemon
+    worker thread (a known ConPTY edge case) that returns 0, leaving the
+    capture's ``window_meta`` empty even when the AX helper *did*
+    successfully introspect the same window via the anchored HWND/PID.
+    Downstream stages then surface the missing app name as ``Unknown``.
+
+    Two ranked fallbacks fill the gap, mirroring the data the macOS
+    osascript path would have produced:
+
+    1. **AX tree's frontmost app** — the helper was invoked with the
+       watcher's anchor hwnd/pid, so its ``apps[].name`` /
+       ``apps[].bundle_id`` / ``windows[].title`` describe exactly the
+       window the user was on at capture time.
+    2. **Watcher trigger** — what `WinEventHook` saw when the event
+       fired. Used last because the hwnd may have changed in the few ms
+       before `_build_capture` ran. ``app_name`` is derived from
+       ``bundle_id`` (the executable path) since the trigger schema
+       intentionally has no app_name field.
+
+    Mac never hits the fallbacks because ``osascript`` is reliable when
+    AX permission is granted, but the function is platform-agnostic so
+    behaviour stays uniform.
+    """
+    out = dict(primary)
+
+    ax_app: dict[str, Any] | None = None
+    ax_window: dict[str, Any] | None = None
+    if isinstance(ax_tree, dict):
+        apps = ax_tree.get("apps") or []
+        for app in apps:
+            if app.get("is_frontmost"):
+                ax_app = app
+                break
+        if ax_app is None and apps:
+            ax_app = apps[0]
+        if ax_app is not None:
+            windows = ax_app.get("windows") or []
+            for w in windows:
+                if w.get("focused"):
+                    ax_window = w
+                    break
+            if ax_window is None and windows:
+                ax_window = windows[0]
+
+    if not out.get("app_name"):
+        if ax_app and ax_app.get("name"):
+            out["app_name"] = str(ax_app["name"])
+        elif trigger and trigger.get("bundle_id"):
+            # Trigger has no app_name; derive it from the exe path's stem.
+            out["app_name"] = Path(str(trigger["bundle_id"])).stem
+
+    if not out.get("title"):
+        if ax_window and ax_window.get("title"):
+            out["title"] = str(ax_window["title"])
+        elif trigger and trigger.get("window_title"):
+            out["title"] = str(trigger["window_title"])
+
+    if not out.get("bundle_id"):
+        if ax_app and ax_app.get("bundle_id"):
+            out["bundle_id"] = str(ax_app["bundle_id"])
+        elif trigger and trigger.get("bundle_id"):
+            out["bundle_id"] = str(trigger["bundle_id"])
+
+    return out
 
 
 def _build_capture(
@@ -49,7 +140,7 @@ def _build_capture(
     out: dict[str, Any] = {
         "timestamp": ts,
         "schema_version": 2,
-        "trigger": trigger or {"event_type": "heartbeat"},
+        "trigger": _public_trigger(trigger),
     }
 
     meta = window_meta.active_window()
@@ -60,7 +151,19 @@ def _build_capture(
     }
 
     if provider.available:
-        result = provider.capture_frontmost(focused_window_only=True)
+        # On Windows the helper subprocess can't see the desktop, so we
+        # must hand it the foreground HWND/PID. The watcher includes
+        # ``hwnd`` in every event it emits — that's the exact window the
+        # event came from, eliminating any race vs polling. Heartbeat
+        # captures (no trigger) fall back to GetForegroundWindow inside
+        # the provider. Mac ignores these hints.
+        anchor_hwnd = int((trigger or {}).get("hwnd") or 0)
+        anchor_pid = int((trigger or {}).get("pid") or 0)
+        result = provider.capture_frontmost(
+            focused_window_only=True,
+            anchor_hwnd=anchor_hwnd,
+            anchor_pid=anchor_pid,
+        )
         if result is not None:
             out["ax_tree"] = result.raw_json
             out["ax_metadata"] = result.metadata
@@ -79,7 +182,14 @@ def _build_capture(
                 "height": shot.height,
             }
 
-    s1_parser.enrich(out)
+    # Backfill empty window_meta fields from the AX tree / trigger so a
+    # GetForegroundWindow hiccup on Windows doesn't surface downstream as
+    # "Unknown". See _resolve_window_meta for ranking + rationale.
+    out["window_meta"] = _resolve_window_meta(
+        out["window_meta"], out.get("ax_tree"), trigger,
+    )
+
+    s1_parser.enrich(out, trigger=trigger)
     return out
 
 
@@ -301,7 +411,7 @@ async def run_forever(
 
     runner = _CaptureRunner(cfg, provider, pre_capture_hook=pre_capture_hook)
     runner.start_worker()
-    watcher: AXWatcherProcess | None = None
+    watcher: EventWatcher | None = None
     dispatcher: EventDispatcher | None = None
 
     def _on_capture(trigger: dict[str, Any] | None) -> None:
@@ -310,7 +420,7 @@ async def run_forever(
         runner.run_threaded(trigger)
 
     if cfg.event_driven:
-        watcher = AXWatcherProcess()
+        watcher = create_watcher()
         if watcher.available:
             dispatcher = EventDispatcher(
                 _on_capture,

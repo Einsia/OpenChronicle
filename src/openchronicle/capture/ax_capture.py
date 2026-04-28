@@ -1,7 +1,9 @@
-"""Cross-platform-stub AX Tree capture (macOS only in v1).
+"""Cross-platform AX / UI Automation tree capture.
 
-Wraps the vendored `mac-ax-helper` Swift binary. Ported from Einsia-Partner's
-backend/core/capture/ax_capture_service.py with Windows branch removed and
+macOS: vendored ``mac-ax-helper`` Swift binary
+Windows: vendored ``win-uia-helper.ps1`` PowerShell script (uses .NET UIAutomation)
+
+Ported from Einsia-Partner's backend/core/capture/ax_capture_service.py with
 resource resolution adapted for a uv/pip-installable package.
 """
 
@@ -20,6 +22,39 @@ from .ax_models import AXCaptureResult
 logger = get("openchronicle.capture")
 
 _SUBPROCESS_TIMEOUT = 10  # seconds (covers --timeout 3 + overhead)
+_WIN_SUBPROCESS_TIMEOUT = 15  # PowerShell startup overhead
+
+
+def _foreground_hwnd_pid() -> tuple[int, int]:
+    """Resolve (hwnd, pid) of the current foreground window.
+
+    Used on Windows to anchor the win-uia-helper subprocess to the user's
+    actual foreground app (the helper itself can't see the desktop —
+    see _run() for the why). On non-Windows or if the call fails we
+    return (0, 0); the helper falls back to its own GetForegroundWindow.
+    """
+    if platform.system() != "Windows":
+        return (0, 0)
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+
+        user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+        user32.GetForegroundWindow.argtypes = []
+        user32.GetForegroundWindow.restype = wt.HWND
+        user32.GetWindowThreadProcessId.argtypes = [
+            wt.HWND, ctypes.POINTER(wt.DWORD)
+        ]
+        user32.GetWindowThreadProcessId.restype = wt.DWORD
+        hwnd = user32.GetForegroundWindow() or 0
+        if not hwnd:
+            return (0, 0)
+        pid = wt.DWORD(0)
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return (int(hwnd), int(pid.value))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("foreground HWND query failed: %s", exc)
+        return (0, 0)
 
 
 def _strip_frame_fields(value: Any) -> Any:
@@ -123,7 +158,13 @@ class AXProvider(Protocol):
     @property
     def available(self) -> bool: ...
 
-    def capture_frontmost(self, *, focused_window_only: bool = True) -> AXCaptureResult | None: ...
+    def capture_frontmost(
+        self,
+        *,
+        focused_window_only: bool = True,
+        anchor_hwnd: int = 0,
+        anchor_pid: int = 0,
+    ) -> AXCaptureResult | None: ...
 
     def capture_all_visible(self) -> AXCaptureResult | None: ...
 
@@ -140,7 +181,13 @@ class UnavailableAXProvider:
     def available(self) -> bool:
         return False
 
-    def capture_frontmost(self, *, focused_window_only: bool = True) -> AXCaptureResult | None:
+    def capture_frontmost(
+        self,
+        *,
+        focused_window_only: bool = True,
+        anchor_hwnd: int = 0,
+        anchor_pid: int = 0,
+    ) -> AXCaptureResult | None:
         return None
 
     def capture_all_visible(self) -> AXCaptureResult | None:
@@ -165,7 +212,16 @@ class MacAXHelperProvider:
     def available(self) -> bool:
         return True
 
-    def capture_frontmost(self, *, focused_window_only: bool = True) -> AXCaptureResult | None:
+    def capture_frontmost(
+        self,
+        *,
+        focused_window_only: bool = True,
+        anchor_hwnd: int = 0,
+        anchor_pid: int = 0,
+    ) -> AXCaptureResult | None:
+        # mac-ax-helper resolves the frontmost app via NSWorkspace; the
+        # anchor_hwnd / anchor_pid hints are Windows-only and ignored here.
+        del anchor_hwnd, anchor_pid
         return self._run(all_visible=False, focused_window_only=focused_window_only)
 
     def capture_all_visible(self) -> AXCaptureResult | None:
@@ -237,13 +293,178 @@ class MacAXHelperProvider:
         )
 
 
-def create_provider(*, depth: int = 8, timeout: int = 3, raw: bool = False) -> AXProvider:
-    if platform.system() != "Darwin":
-        return UnavailableAXProvider(f"unsupported platform: {platform.system()}")
-    helper = _resolve_helper_path()
-    if helper is None:
-        return UnavailableAXProvider(
-            "mac-ax-helper not found. Build it: bash resources/build-mac-ax-helper.sh"
+class WinUIAutomationProvider:
+    """Subprocess wrapper around the vendored win-uia-helper.ps1 PowerShell script."""
+
+    def __init__(self, *, script_path: Path, depth: int, timeout: int, raw: bool = False) -> None:
+        self._script_path = str(script_path)
+        self._depth = depth
+        self._timeout = timeout
+        self._raw = raw
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    def capture_frontmost(
+        self,
+        *,
+        focused_window_only: bool = True,
+        anchor_hwnd: int = 0,
+        anchor_pid: int = 0,
+    ) -> AXCaptureResult | None:
+        return self._run(
+            all_visible=False,
+            focused_window_only=focused_window_only,
+            anchor_hwnd=anchor_hwnd,
+            anchor_pid=anchor_pid,
         )
-    logger.info("AX capture initialized: %s", helper)
-    return MacAXHelperProvider(helper_path=helper, depth=depth, timeout=timeout, raw=raw)
+
+    def capture_all_visible(self) -> AXCaptureResult | None:
+        return self._run(all_visible=True)
+
+    def capture_app(
+        self, app_name: str, *, focused_window_only: bool = True
+    ) -> AXCaptureResult | None:
+        return self._run(
+            all_visible=False, app_name=app_name, focused_window_only=focused_window_only
+        )
+
+    def _run(
+        self,
+        *,
+        all_visible: bool,
+        app_name: str | None = None,
+        focused_window_only: bool = False,
+        anchor_hwnd: int = 0,
+        anchor_pid: int = 0,
+    ) -> AXCaptureResult | None:
+        args: list[str] = [
+            "powershell", "-ExecutionPolicy", "Bypass", "-NoProfile",
+            "-File", self._script_path,
+        ]
+        if app_name:
+            args.extend(["-AppName", app_name])
+        elif all_visible:
+            args.append("-AllVisible")
+        if focused_window_only:
+            args.append("-FocusedWindowOnly")
+        if self._raw:
+            args.append("-Raw")
+        args.extend(["-Depth", str(self._depth)])
+
+        # Anchor the helper to the user's foreground window. Required
+        # because the helper subprocess runs in a session-isolated state
+        # (no console, no desktop access — see Windows session/desktop
+        # isolation rules) where its own GetForegroundWindow / UIA
+        # FocusedElement always return zero.
+        #
+        # Source priority:
+        #   1. Caller-supplied anchor (anchor_hwnd / anchor_pid) — comes
+        #      from the watcher event that triggered this capture, so
+        #      it's the *exact* HWND that fired the event.
+        #   2. Daemon-process GetForegroundWindow — usable for heartbeat
+        #      captures or whenever no triggering event exists.
+        #
+        # mac's NSWorkspace.frontmostApplication is the moral equivalent;
+        # it just doesn't need the explicit hand-off because the helper
+        # has its own desktop access there.
+        if not all_visible and not app_name:
+            hwnd, pid = anchor_hwnd, anchor_pid
+            if not hwnd:
+                hwnd, pid = _foreground_hwnd_pid()
+            if hwnd:
+                args.extend(["-ForegroundHwnd", str(hwnd)])
+                args.extend(["-ForegroundPid", str(pid)])
+
+        # CREATE_NO_WINDOW: when the daemon runs detached (no console of
+        # its own), every subprocess.run that launches powershell.exe
+        # would otherwise be given a fresh console window — visible as
+        # a black cmd window flashing on every capture event. The flag
+        # is Windows-only; getattr keeps the import portable.
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            proc = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=_WIN_SUBPROCESS_TIMEOUT,
+                creationflags=creationflags,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("win-uia-helper timed out after %ds", _WIN_SUBPROCESS_TIMEOUT)
+            return None
+        except OSError as exc:
+            logger.error("Failed to run win-uia-helper: %s", exc)
+            return None
+
+        if proc.returncode != 0:
+            logger.warning(
+                "win-uia-helper exited %d: %s", proc.returncode, proc.stderr.strip()[:200]
+            )
+            return None
+
+        try:
+            data = json.loads(proc.stdout)
+        except json.JSONDecodeError as exc:
+            logger.warning("Failed to parse win-uia-helper JSON: %s", exc)
+            return None
+
+        data = _strip_frame_fields(data)
+        mode = "all-visible" if all_visible else "frontmost"
+        return AXCaptureResult(
+            raw_json=data,
+            timestamp=data.get("timestamp", ""),
+            apps=data.get("apps", []),
+            metadata={"mode": mode, "depth": self._depth, "platform": "windows", "raw": self._raw},
+        )
+
+
+def _resolve_win_helper_path() -> Path | None:
+    """Find the win-uia-helper.ps1 script."""
+    override = os.environ.get("OPENCHRONICLE_WIN_UIA_HELPER")
+    if override:
+        p = Path(override).expanduser().resolve()
+        if p.is_file():
+            return p
+        logger.warning("OPENCHRONICLE_WIN_UIA_HELPER set but not found: %s", p)
+
+    candidates: list[Path] = []
+
+    try:
+        from importlib.resources import files as _pkg_files
+
+        bundled_dir = Path(str(_pkg_files("openchronicle").joinpath("_bundled")))
+        candidates.append(bundled_dir / "win-uia-helper.ps1")
+    except (ModuleNotFoundError, ValueError):
+        pass
+
+    dev_root = Path(__file__).resolve().parents[3]
+    candidates.append(dev_root / "resources" / "win-uia-helper.ps1")
+
+    for p in candidates:
+        if p.is_file():
+            return p
+
+    return None
+
+
+def create_provider(*, depth: int = 8, timeout: int = 3, raw: bool = False) -> AXProvider:
+    system = platform.system()
+    if system == "Darwin":
+        helper = _resolve_helper_path()
+        if helper is None:
+            return UnavailableAXProvider(
+                "mac-ax-helper not found. Build it: bash resources/build-mac-ax-helper.sh"
+            )
+        logger.info("AX capture initialized (macOS): %s", helper)
+        return MacAXHelperProvider(helper_path=helper, depth=depth, timeout=timeout, raw=raw)
+    if system == "Windows":
+        script = _resolve_win_helper_path()
+        if script is None:
+            return UnavailableAXProvider(
+                "win-uia-helper.ps1 not found. Reinstall OpenChronicle."
+            )
+        logger.info("UI Automation capture initialized (Windows): %s", script)
+        return WinUIAutomationProvider(script_path=script, depth=depth, timeout=timeout, raw=raw)
+    return UnavailableAXProvider(f"unsupported platform: {system}")

@@ -88,6 +88,8 @@ def compact_file(cfg: Config, conn: sqlite3.Connection, *, name: str) -> Compact
         )
     compacted.metadata["needs_compact"] = False
     new_text = frontmatter.dumps(compacted) + "\n"
+    compacted_entries = files_mod._parse_entries(compacted.content)
+    prefix = files_mod.validate_prefix(path.name)
 
     after_unique = _unique_tokens(new_text)
     preserved = len(before_unique & after_unique)
@@ -128,34 +130,39 @@ def compact_file(cfg: Config, conn: sqlite3.Connection, *, name: str) -> Compact
 
         # Re-ingest this file's entries into FTS while still holding the same
         # file lock so on-disk Markdown and index rows move forward together.
-        fts.delete_entries_for(conn, path.name)
-        parsed = files_mod.read_file(path)
-        prefix = files_mod.validate_prefix(path.name)
-        fts.upsert_file(
-            conn,
-            fts.FileRow(
-                path=path.name,
-                prefix=prefix,
-                description=parsed.description,
-                tags=" ".join(parsed.tags),
-                status=parsed.status,
-                entry_count=len(parsed.entries),
-                created=parsed.created,
-                updated=parsed.updated,
-                needs_compact=0,
-            ),
-        )
-        for e in parsed.entries:
-            fts.insert_entry(
+        conn.execute("SAVEPOINT compact_file_fts")
+        try:
+            fts.delete_entries_for(conn, path.name)
+            fts.upsert_file(
                 conn,
-                id=e.id,
-                path=path.name,
-                prefix=prefix,
-                timestamp=e.timestamp,
-                tags=" ".join(e.tags),
-                content=entries_mod._strip_strike(e.body),
-                superseded=1 if e.superseded_by else 0,
+                fts.FileRow(
+                    path=path.name,
+                    prefix=prefix,
+                    description=str(compacted.metadata.get("description", "")),
+                    tags=" ".join(compacted.metadata.get("tags", []) or []),
+                    status=str(compacted.metadata.get("status", "active")),
+                    entry_count=len(compacted_entries),
+                    created=str(compacted.metadata.get("created", "")),
+                    updated=str(compacted.metadata.get("updated", "")),
+                    needs_compact=0,
+                ),
             )
+            for e in compacted_entries:
+                fts.insert_entry(
+                    conn,
+                    id=e.id,
+                    path=path.name,
+                    prefix=prefix,
+                    timestamp=e.timestamp,
+                    tags=" ".join(e.tags),
+                    content=entries_mod._strip_strike(e.body),
+                    superseded=1 if e.superseded_by else 0,
+                )
+        except Exception:
+            conn.execute("ROLLBACK TO SAVEPOINT compact_file_fts")
+            conn.execute("RELEASE SAVEPOINT compact_file_fts")
+            raise
+        conn.execute("RELEASE SAVEPOINT compact_file_fts")
 
     logger.info(
         "compact accepted: %s  %d→%d tokens (%.1f%% preservation)",

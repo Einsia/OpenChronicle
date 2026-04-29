@@ -5,9 +5,16 @@ from unittest.mock import patch
 
 import pytest
 
+from openchronicle.config import Config
 from openchronicle.store import entries as entries_mod
 from openchronicle.store import files as files_mod
 from openchronicle.store import fts, index_md
+from openchronicle.writer import compact as compact_mod
+
+
+class _LLMTextResponse:
+    def __init__(self, content: str) -> None:
+        self.choices = [type("_Choice", (), {"message": type("_Msg", (), {"content": content})()})()]
 
 
 def test_make_id_uniqueness() -> None:
@@ -298,3 +305,73 @@ def test_concurrent_supersede_then_append_serializes(ac_root: Path) -> None:
         f"expected 3 entries, got {len(parsed.entries)} — interleaved writes "
         f"likely lost or corrupted one"
     )
+
+
+def test_compact_accepts_when_file_unchanged(ac_root: Path) -> None:
+    name = "topic-compact.md"
+    with fts.cursor() as conn:
+        entries_mod.create_file(conn, name=name, description="compact target", tags=["topic"])
+        entries_mod.append_entry(
+            conn,
+            name=name,
+            content=(
+                "AlphaProject BetaRoadmap GammaDecision DeltaTimeline "
+                "EpsilonMemory ZetaCapture EtaClassifier ThetaReducer."
+            ),
+            tags=["topic"],
+        )
+        path = files_mod.memory_path(name)
+        files_mod.update_frontmatter(path, {"needs_compact": True})
+        fts.set_needs_compact(conn, name, True)
+
+        with patch("openchronicle.writer.compact.llm_mod.call_llm") as call_llm:
+            call_llm.return_value = _LLMTextResponse(path.read_text())
+            result = compact_mod.compact_file(Config(), conn, name=name)
+
+        assert result.accepted is True
+        parsed = files_mod.read_file(path)
+        assert parsed.needs_compact is False
+        assert fts.get_file(conn, name).needs_compact == 0
+
+
+def test_compact_skips_if_file_changes_during_llm_rewrite(ac_root: Path) -> None:
+    """Compaction must not overwrite entries appended while the LLM is running."""
+    name = "topic-compact-race.md"
+    with fts.cursor() as conn:
+        entries_mod.create_file(conn, name=name, description="compact race", tags=["topic"])
+        entries_mod.append_entry(
+            conn,
+            name=name,
+            content=(
+                "AlphaProject BetaRoadmap GammaDecision DeltaTimeline "
+                "EpsilonMemory ZetaCapture EtaClassifier ThetaReducer."
+            ),
+            tags=["topic"],
+        )
+        path = files_mod.memory_path(name)
+        files_mod.update_frontmatter(path, {"needs_compact": True})
+        fts.set_needs_compact(conn, name, True)
+
+        def append_during_rewrite(*args, **kwargs) -> _LLMTextResponse:
+            stale_rewrite = path.read_text()
+            with fts.cursor() as append_conn:
+                entries_mod.append_entry(
+                    append_conn,
+                    name=name,
+                    content="ConcurrentAppendToken must survive compaction.",
+                    tags=["topic"],
+                )
+            return _LLMTextResponse(stale_rewrite)
+
+        with patch(
+            "openchronicle.writer.compact.llm_mod.call_llm",
+            side_effect=append_during_rewrite,
+        ):
+            result = compact_mod.compact_file(Config(), conn, name=name)
+
+    assert result.accepted is False
+    assert "changed during compact" in result.note
+    parsed = files_mod.read_file(files_mod.memory_path(name))
+    bodies = "\n".join(e.body for e in parsed.entries)
+    assert "ConcurrentAppendToken" in bodies
+    assert parsed.needs_compact is True

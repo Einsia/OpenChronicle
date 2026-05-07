@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/einsia-openchronicle-badge.png)](https://mseep.ai/app/einsia-openchronicle)
+
 <p align="center">
   <img src="assets/logo.png" alt="OpenChronicle" width="600" />
 </p>

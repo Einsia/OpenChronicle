@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "id": "xiaohongshu_search",
+  "name": "Xiaohongshu keyword search",
+  "provider": "android_adb",
+  "platform": "android",
+  "app": {
+    "name": "Xiaohongshu",
+    "package": "com.xingin.xhs"
+  },
+  "inputs": {
+    "keyword": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "steps": [
+    {
+      "id": "launch",
+      "action": "launch_app",
+      "package": "com.xingin.xhs",
+      "verify": {
+        "ocr_any": ["首页", "推荐", "搜索"]
+      }
+    },
+    {
+      "id": "tap_search",
+      "action": "tap_text",
+      "text": "搜索",
+      "fallback_area": [700, 40, 980, 180],
+      "verify": {
+        "ocr_any": ["搜索", "搜索小红书"]
+      }
+    },
+    {
+      "id": "input_keyword",
+      "action": "type",
+      "value": "{{keyword}}",
+      "verify": {
+        "ocr_any": ["{{keyword}}"]
+      }
+    }
+  ],
+  "failure_policy": {
+    "retry": 2,
+    "on_ocr_fail": "fallback_area",
+    "on_unknown_page": "stop_and_log",
+    "on_sensitive_page": "takeover"
+  },
+  "memory": {
+    "save_trace": true,
+    "save_keyframes": true,
+    "distill_to_skill": true
+  }
+}

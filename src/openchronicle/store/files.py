@@ -7,6 +7,7 @@ import os
 import re
 import tempfile
 import threading
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import date
@@ -48,9 +49,9 @@ def atomic_write_text(path: Path, content: str) -> None:
             os.fsync(f.fileno())
         # Preserve permissions of the existing file so updates don't
         # silently flip group/other-read bits set by the user.
-        with contextlib.suppress(FileNotFoundError):
+        with contextlib.suppress(OSError):
             os.chmod(tmp_path, path.stat().st_mode & 0o7777)
-        os.replace(tmp_path, path)
+        _replace_with_retry(tmp_path, path)
         # Persist the directory entry so a power loss right after the
         # rename can't leave the dir pointing at neither old nor new.
         # macOS APFS sometimes returns EINVAL on directory fsync; the
@@ -66,6 +67,18 @@ def atomic_write_text(path: Path, content: str) -> None:
         with contextlib.suppress(OSError):
             tmp_path.unlink()
         raise
+
+
+def _replace_with_retry(tmp_path: Path, path: Path) -> None:
+    attempts = 8 if os.name == "nt" else 1
+    for attempt in range(attempts):
+        try:
+            os.replace(tmp_path, path)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.05 * (attempt + 1))
 
 VALID_PREFIXES = ("user-", "project-", "tool-", "topic-", "person-", "org-", "event-")
 
@@ -184,7 +197,7 @@ def write_file(path: Path, fm: dict[str, Any], body: str) -> None:
 def read_file(path: Path) -> ParsedFile:
     if not path.exists():
         raise FileNotFoundError(path)
-    post = frontmatter.load(path)
+    post = frontmatter.loads(path.read_text(encoding="utf-8"))
     fm = dict(post.metadata)
     body = post.content
     entries = _parse_entries(body)
@@ -251,7 +264,7 @@ def render_file(
 
 def update_frontmatter(path: Path, updates: dict[str, Any]) -> None:
     with file_lock(path):
-        post = frontmatter.load(path)
+        post = frontmatter.loads(path.read_text(encoding="utf-8"))
         post.metadata.update(updates)
         atomic_write_text(path, frontmatter.dumps(post) + "\n")
 

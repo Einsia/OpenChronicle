@@ -4,7 +4,7 @@ OpenChronicle is a single daemon that ingests capture events, compresses them th
 
 ```mermaid
 flowchart LR
-    W[mac-ax-watcher<br/>Swift binary]
+    W[platform capture source<br/>mac-ax-watcher · windows-uia-poller]
 
     subgraph capture [Capture Layer]
         direction TB
@@ -60,7 +60,7 @@ A typical 5-minute flush window, showing how one AX event propagates through to 
 
 ```mermaid
 sequenceDiagram
-    participant W as mac-ax-watcher
+    participant W as capture source
     participant S0 as S0 dispatcher
     participant S1 as S1 parser
     participant BUF as capture-buffer
@@ -109,7 +109,7 @@ Defined in `src/openchronicle/daemon.py`.
 
 | Task | Purpose |
 |---|---|
-| `capture` | Consumes `mac-ax-watcher` events, debounces, writes enriched JSON captures (incl. S1 fields) to `~/.openchronicle/capture-buffer/`. Heartbeat catches quiet periods. Also calls `SessionManager.on_event` on every capture so the session cutter sees the same signal. |
+| `capture` | Consumes macOS `mac-ax-watcher` events or Windows UI Automation poll events, debounces, writes enriched JSON captures (incl. S1 fields) to the capture buffer. Heartbeat catches quiet periods. Also calls `SessionManager.on_event` on every capture so the session cutter sees the same signal. |
 | `timeline` | Every 60s scans for closed wall-clock windows (default 1 min) and runs the `timeline` LLM stage to normalize each window while preserving authored text verbatim. Cleans buffer files older than the newest block. |
 | `session` | Every `session.tick_seconds` (default 30), calls `SessionManager.check_cuts()` so idle-gap and timeout cuts fire even when the dispatcher is quiet. |
 | `flush` | Every `session.flush_minutes` (default 5, clamped to 5-min floor), runs the reducer incrementally over the active session's newly closed timeline blocks (~5 of them at defaults) and appends `[flush]`-tagged partial entries to today's event-daily. |
@@ -133,8 +133,11 @@ Force-end is also called on daemon shutdown and on the 23:55 safety net, so a se
 
 ## On-disk state
 
+macOS/Linux: `~/.openchronicle/`
+Windows: `%LOCALAPPDATA%\OpenChronicle\`
+
 ```
-~/.openchronicle/
+<root>/
 ├── config.toml               # single source of truth for runtime config
 ├── .pid                      # daemon PID; absence ⇒ stopped
 ├── .paused                   # sentinel — capture skips while present
@@ -163,10 +166,11 @@ src/openchronicle/
 ├── cli.py                    # Typer entry point
 ├── daemon.py                 # Async task orchestration
 ├── config.py                 # TOML loader, per-stage ModelConfig inheritance
-├── paths.py                  # ~/.openchronicle/* paths
+├── paths.py                  # platform data-root paths
 ├── logger.py                 # Rotating file sinks per component
 ├── capture/
 │   ├── watcher.py            # Spawns mac-ax-watcher, parses JSONL
+│   ├── windows_uia.py        # Windows UI Automation provider + poller
 │   ├── event_dispatcher.py   # Debounce / dedup / min-gap
 │   ├── ax_capture.py         # One-shot mac-ax-helper invocation
 │   ├── ax_models.py          # ax_tree_to_markdown, prune helpers

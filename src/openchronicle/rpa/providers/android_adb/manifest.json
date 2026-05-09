@@ -1,0 +1,28 @@
+{
+  "name": "android_adb",
+  "type": "device_rpa",
+  "platform": ["android"],
+  "actions": [
+    "tap",
+    "tap_relative",
+    "tap_text",
+    "type",
+    "swipe",
+    "back",
+    "home",
+    "launch_app",
+    "wait",
+    "takeover"
+  ],
+  "observe": ["screenshot", "ocr", "current_app", "screen_size", "ui_xml"],
+  "safety_level": "high",
+  "requires_confirmation": [
+    "payment",
+    "order",
+    "delete",
+    "send_message",
+    "login",
+    "permission_grant"
+  ],
+  "memory_output": ["trace", "keyframes", "workflow_result", "skill_candidate"]
+}

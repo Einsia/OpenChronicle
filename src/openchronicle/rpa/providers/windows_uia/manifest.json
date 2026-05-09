@@ -1,0 +1,17 @@
+{
+  "name": "windows_uia",
+  "type": "desktop_rpa",
+  "platform": ["windows"],
+  "actions": ["click", "type", "hotkey", "wait"],
+  "observe": ["window_title", "process_name", "control_tree"],
+  "safety_level": "medium",
+  "requires_confirmation": [
+    "payment",
+    "order",
+    "delete",
+    "send_message",
+    "login",
+    "permission_grant"
+  ],
+  "memory_output": ["trace", "workflow_result", "skill_candidate"]
+}

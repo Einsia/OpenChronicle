@@ -38,7 +38,7 @@ def test_write_default_creates_file(tmp_path: Path) -> None:
     p = tmp_path / "config.toml"
     assert config.write_default_if_missing(p)
     assert p.exists()
-    assert "[models.default]" in p.read_text()
+    assert "[models.default]" in p.read_text(encoding="utf-8")
     # idempotent
     assert not config.write_default_if_missing(p)
 

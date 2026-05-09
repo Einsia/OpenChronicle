@@ -1,8 +1,9 @@
-"""Single source of truth for on-disk locations under ~/.openchronicle/."""
+"""Single source of truth for on-disk OpenChronicle locations."""
 
 from __future__ import annotations
 
 import os
+import platform
 from pathlib import Path
 
 
@@ -10,6 +11,11 @@ def root() -> Path:
     override = os.environ.get("OPENCHRONICLE_ROOT")
     if override:
         return Path(override).expanduser().resolve()
+    if platform.system() == "Windows":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            return Path(local_app_data) / "OpenChronicle"
+        return Path.home() / "AppData" / "Local" / "OpenChronicle"
     return Path.home() / ".openchronicle"
 
 

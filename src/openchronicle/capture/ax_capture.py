@@ -1,8 +1,8 @@
-"""Cross-platform-stub AX Tree capture (macOS only in v1).
+"""Cross-platform AX Tree capture provider selection.
 
 Wraps the vendored `mac-ax-helper` Swift binary. Ported from Einsia-Partner's
-backend/core/capture/ax_capture_service.py with Windows branch removed and
-resource resolution adapted for a uv/pip-installable package.
+backend/core/capture/ax_capture_service.py with resource resolution adapted
+for a uv/pip-installable package.
 """
 
 from __future__ import annotations
@@ -238,6 +238,10 @@ class MacAXHelperProvider:
 
 
 def create_provider(*, depth: int = 8, timeout: int = 3, raw: bool = False) -> AXProvider:
+    if platform.system() == "Windows":
+        from .windows_uia import create_provider as create_windows_provider
+
+        return create_windows_provider(depth=depth, timeout=timeout, raw=raw)
     if platform.system() != "Darwin":
         return UnavailableAXProvider(f"unsupported platform: {platform.system()}")
     helper = _resolve_helper_path()

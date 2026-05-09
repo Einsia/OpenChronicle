@@ -97,7 +97,7 @@ def append_entry(
     # write — both writes claim "+1 entry" but only one entry survives
     # while the FTS index keeps both, leaving file/index inconsistent.
     with files_mod.file_lock(path):
-        post = frontmatter.load(path)
+        post = frontmatter.loads(path.read_text(encoding="utf-8"))
         current = post.content.rstrip()
         new_block = f"\n\n{heading}\n{body}\n" if current else f"{heading}\n{body}\n"
         post.content = current + new_block
@@ -178,7 +178,7 @@ def supersede_entry(
         )
 
         # Modify file text directly to preserve formatting
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         # 1) append #superseded-by to old heading (only if not already present)
         old_heading = target.heading_line
         if f"superseded-by:{new_id}" not in old_heading:

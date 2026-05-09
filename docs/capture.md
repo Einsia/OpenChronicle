@@ -1,16 +1,18 @@
 # Capture
 
-Capture is the only layer that touches the outside world. It produces one JSON file per observation into `~/.openchronicle/capture-buffer/`; nothing above it ever talks to macOS directly.
+Capture is the only layer that touches the outside world. It produces one JSON file per observation into the platform capture buffer (`~/.openchronicle/capture-buffer/` on macOS, `%LOCALAPPDATA%\OpenChronicle\capture-buffer\` on Windows); nothing above it talks to OS APIs directly.
 
-## Two signal sources
+## Platform signal sources
 
 **`mac-ax-watcher`** (primary, event-driven). A vendored Swift binary that subscribes to AX notifications across all running apps: window focus, value changes (typing), title changes, app activation. It emits one JSON object per event on stdout. The Python side reads that stream line-by-line in `capture/watcher.py` → `capture/event_dispatcher.py`.
+
+**Windows UI Automation poller** (Windows 11). A Python polling source reads the foreground app/window through Win32 APIs, emits macOS-style event names (`AXApplicationActivated`, `AXFocusedWindowChanged`, `AXValueChanged`), and lets the existing dispatcher apply the same debounce, dedup, and min-gap rules. It does not install low-level hooks.
 
 **Heartbeat timer** (fallback). Every `heartbeat_minutes` (default 10), the scheduler fires a capture even if no event arrived — so long idle periods leave a trail. Set `heartbeat_minutes = 0` to disable entirely (watcher-only); values `>0` are clamped to a 60-second floor.
 
 Both funnel into `capture_once` in `capture/scheduler.py`, which runs:
 
-1. `ax_capture.capture_frontmost(focused_window_only=True)` — one-shot invocation of `mac-ax-helper` for the current window, pruned to `ax_depth` layers.
+1. `ax_capture.capture_frontmost(focused_window_only=True)` — one-shot invocation of `mac-ax-helper` on macOS or Windows UI Automation on Windows, pruned to `ax_depth` layers.
 2. `s1_parser.enrich()` — extracts `focused_element`, `visible_text`, and `url` from the AX tree (see [S1 fields](#s1-fields) below).
 3. `screenshot.grab()` — unless `include_screenshot = false`.
 4. `window_meta.active_window()` — app name, title, bundle_id via `NSRunningApplication`.
@@ -39,9 +41,9 @@ On top of the time-based knobs, the scheduler compares each built capture agains
 
 This catches the case the time knobs can't: a screen that doesn't change (lock screen overnight, a paused video, an idle IDE) keeps generating AX events with the same content indefinitely. Without content-dedup those would both fill the buffer and keep the current session from ever idling out. Timestamps, triggers, and screenshots are excluded from the fingerprint so only meaningful changes count.
 
-## AX depth — the #1 footgun
+## AX / UIA depth — the #1 footgun
 
-AX Trees for native Cocoa apps are shallow (5–15 layers). Electron apps (Claude Desktop, VS Code, Slack, Notion) nest user content 20–60 layers deep under chrome.
+AX Trees for native Cocoa apps are shallow (5–15 layers). Electron apps (Claude Desktop, VS Code, Slack, Notion) and browser UIA trees can nest user content 20–60 layers deep under chrome.
 
 **Default `ax_depth = 100`** was chosen after diagnosing silent capture misses: a 90-second Claude Desktop conversation about an interview at 18:00 was producing captures where "18:00" appeared at character 5639 of the tree — past any reasonable prune limit. At depth 8, the tree contained only window chrome and sidebar headers; at depth 100, the full conversation was there.
 
@@ -91,7 +93,7 @@ A 10×+ ratio means there's content past depth 30 you'd miss.
 
 `trigger` is `{"event_type": "heartbeat"}` for timer captures and `{"event_type": "manual"}` for `capture-once`. Screenshot is omitted entirely when `include_screenshot = false`.
 
-Secure fields (password inputs) are replaced with `"[REDACTED]"` at the helper level — the Python side never sees them.
+Secure fields (password inputs) are replaced with `"[REDACTED]"` at the macOS helper level. Windows UIA capture reads only the accessibility values exposed by the foreground app.
 
 ## S1 fields
 
@@ -99,7 +101,7 @@ Ported from Einsia-Partner's `s1_collector`. These are what downstream LLM stage
 
 - **`focused_element`** — `{role, title, value, is_editable, value_length}` for the currently focused AX element. This is the user's cursor context: what they're typing into, which sidebar row is selected, etc.
 - **`visible_text`** — a length-capped markdown rendering of the AX tree (up to ~10 k chars). What the user is currently reading on screen.
-- **`url`** — regex-extracted from `visible_text` when present; `null` otherwise.
+- **`url`** — regex-extracted from browser address fields when present; `null` otherwise. Chrome and Edge are supported on Windows first.
 
 Screenshots live in the capture JSON but are **not** passed to the timeline / reducer / classifier prompts. They exist for future vision-model paths and for debugging.
 
@@ -151,7 +153,7 @@ openchronicle rebuild-captures-index
 openchronicle pause
 ```
 
-Drops a `~/.openchronicle/.paused` sentinel. The watcher keeps streaming but `capture_once` short-circuits on sentinel presence. `resume` removes the sentinel.
+Drops a `.paused` sentinel in the platform data root. The watcher/poller keeps running but `capture_once` short-circuits on sentinel presence. `resume` removes the sentinel.
 
 ## Smoke test
 

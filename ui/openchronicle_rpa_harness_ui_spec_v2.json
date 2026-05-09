@@ -1,0 +1,1046 @@
+{
+  "project": {
+    "name": "OpenChronicle RPA Harness",
+    "version": "v0.2.0",
+    "design_mode": "multi_rpa_provider_harness",
+    "pages": [
+      "实时调试控制台",
+      "RPA Provider 管理与 Workflow Studio",
+      "设备舰队",
+      "Workflow 库",
+      "Trace 回放",
+      "安全审批",
+      "记忆中心"
+    ],
+    "goal": "将原手机 RPA 调试台升级为可桥接 Android、Windows、Browser、API 等不同 RPA Provider 的统一 Harness 控制台。",
+    "core_positioning": "人类演示与监督，OpenChronicle 记录学习，Codex 安全复现，Harness 负责桥接、审计、回放、稳定录制和 Skill 沉淀。",
+    "target_users": [
+      "Agent 开发者",
+      "RPA 流程设计人员",
+      "App / 桌面自动化测试工程师",
+      "OpenChronicle / Codex 调试人员",
+      "需要多设备自动化治理的团队"
+    ],
+    "source_alignment": {
+      "base_prd": "openchronicle_rpa_harness_prd.md",
+      "base_ui_spec": "openchronicle_rpa_harness_ui_spec.json",
+      "reference_images": [
+        "automation_console_with_real_time_monitoring.png",
+        "rpa_provider_and_workflow_studio_dashboard.png"
+      ]
+    }
+  },
+  "product_upgrade": {
+    "from": "Android 手机实时调试控制台",
+    "to": "多 RPA Provider 可插拔管理控制台",
+    "must_keep": [
+      "实时调试页",
+      "设备实时画面",
+      "状态机流程",
+      "Action Inspector",
+      "时间线日志",
+      "Skill Builder",
+      "安全审批"
+    ],
+    "must_add": [
+      "RPA Provider 管理",
+      "Device Fleet 设备舰队",
+      "Workflow 库",
+      "录制与编辑 Studio",
+      "Bridge Topology",
+      "Bridge Inspector",
+      "Provider Detail / Manifest Viewer",
+      "Codex mock API contract"
+    ],
+    "design_principle": [
+      "默认轻量运行，不默认全屏截图，不默认 VLM",
+      "常规 workflow 走 OCR / UI tree / DOM / window tree 校验",
+      "异常时才触发 keyframe / full screenshot / VLM repair hook",
+      "所有 action 必须经过 safety 策略",
+      "所有执行过程写入 trace.jsonl",
+      "成功 trace 可以生成 workflow.json 和 skill.yaml"
+    ]
+  },
+  "design_style": {
+    "theme": "light",
+    "keywords": [
+      "企业级",
+      "清爽",
+      "科技感",
+      "高密度信息",
+      "调试工作台",
+      "可审计",
+      "多 Provider 桥接",
+      "稳定录制"
+    ],
+    "colors": {
+      "primary": "#2563EB",
+      "primary_hover": "#1D4ED8",
+      "success": "#16A34A",
+      "warning": "#F59E0B",
+      "danger": "#EF4444",
+      "info": "#0EA5E9",
+      "background": "#F6F8FB",
+      "card": "#FFFFFF",
+      "border": "#E5E7EB",
+      "muted": "#F8FAFC",
+      "text_primary": "#111827",
+      "text_secondary": "#6B7280",
+      "text_muted": "#94A3B8"
+    },
+    "typography": {
+      "font_family": "Inter, PingFang SC, Microsoft YaHei, system-ui, sans-serif",
+      "page_title": "24px/700",
+      "section_title": "16px/600",
+      "body": "14px/400",
+      "caption": "12px/400",
+      "code": "12px/500 JetBrains Mono, SFMono-Regular, Consolas"
+    },
+    "radius": {
+      "card": "16px",
+      "button": "10px",
+      "input": "10px",
+      "badge": "999px"
+    },
+    "shadow": {
+      "card": "0 8px 24px rgba(15, 23, 42, 0.06)",
+      "hover": "0 12px 32px rgba(37, 99, 235, 0.12)"
+    }
+  },
+  "navigation": {
+    "brand": {
+      "title": "OpenChronicle",
+      "subtitle": "Harness",
+      "logo": "hexagon-blue-gradient"
+    },
+    "items": [
+      {
+        "label": "总览",
+        "icon": "Home"
+      },
+      {
+        "label": "实时调试",
+        "icon": "PlayCircle"
+      },
+      {
+        "label": "RPA Provider 管理",
+        "icon": "Network"
+      },
+      {
+        "label": "设备舰队",
+        "icon": "MonitorSmartphone"
+      },
+      {
+        "label": "Workflow 库",
+        "icon": "FolderKanban"
+      },
+      {
+        "label": "技能构建",
+        "icon": "GitBranch"
+      },
+      {
+        "label": "执行器",
+        "icon": "Bot"
+      },
+      {
+        "label": "Trace 回放",
+        "icon": "FileClock"
+      },
+      {
+        "label": "安全审批",
+        "icon": "ShieldCheck",
+        "badge": 6
+      },
+      {
+        "label": "记忆中心",
+        "icon": "Database"
+      },
+      {
+        "label": "设置",
+        "icon": "Settings"
+      }
+    ],
+    "footer": {
+      "plan": "企业版 v2.4.1",
+      "status": "在线",
+      "copyright": "© 2024 OpenChronicle Inc."
+    }
+  },
+  "global_topbar": {
+    "left": [
+      "page_title"
+    ],
+    "provider_switcher": [
+      {
+        "name": "Android ADB",
+        "provider": "android_adb",
+        "icon": "Smartphone",
+        "active": true
+      },
+      {
+        "name": "Windows UIA",
+        "provider": "windows_uia",
+        "icon": "Monitor"
+      },
+      {
+        "name": "Browser Playwright",
+        "provider": "playwright_browser",
+        "icon": "Globe"
+      },
+      {
+        "name": "API Worker",
+        "provider": "api_worker",
+        "icon": "Code2"
+      }
+    ],
+    "widgets": [
+      {
+        "type": "select",
+        "label": "当前任务",
+        "value": "淘宝搜索商品流程"
+      },
+      {
+        "type": "risk_badge",
+        "label": "风险等级",
+        "value": "L2 中风险",
+        "status": "warning"
+      },
+      {
+        "type": "search",
+        "placeholder": "搜索设备、流程、动作、Provider、Workflow...",
+        "shortcut": "⌘K"
+      },
+      {
+        "type": "notification",
+        "badge": 12
+      },
+      {
+        "type": "user",
+        "name": "张工程师",
+        "role": "管理员"
+      }
+    ]
+  },
+  "pages_detail": {
+    "realtime_debug_console": {
+      "route": "/rpa/realtime",
+      "title": "实时调试控制台",
+      "active_nav": "实时调试",
+      "purpose": "统一调试 Android、Windows、Browser、API Worker 等不同 RPA Provider 的执行过程。",
+      "kpi_cards": [
+        {
+          "title": "在线 Provider 数",
+          "value": "4 / 6",
+          "subtitle": "较昨日 ↑ 1",
+          "icon": "Users",
+          "trend": "blue_sparkline"
+        },
+        {
+          "title": "在线设备数",
+          "value": "18 / 32",
+          "subtitle": "较昨日 ↑ 3",
+          "icon": "Smartphone",
+          "trend": "blue_sparkline"
+        },
+        {
+          "title": "Workflow 成功率",
+          "value": "96.3%",
+          "subtitle": "较昨日 ↑ 2.4%",
+          "icon": "ShieldCheck",
+          "trend": "green_sparkline"
+        },
+        {
+          "title": "录制成功率",
+          "value": "92.1%",
+          "subtitle": "较昨日 ↑ 1.8%",
+          "icon": "Target",
+          "trend": "blue_sparkline"
+        },
+        {
+          "title": "待审批任务数",
+          "value": "6",
+          "subtitle": "较昨日 ↓ 2",
+          "icon": "ClipboardCheck",
+          "trend": "orange_sparkline"
+        }
+      ],
+      "layout_grid": {
+        "desktop": "sidebar 232px + main full; topbar 64px; kpi row; main 3 columns; bottom 3 panels",
+        "main_columns": "left 36%, center 22%, right 42%",
+        "bottom_columns": "left 38%, center 31%, right 31%"
+      },
+      "panels": [
+        {
+          "id": "device_live_view",
+          "title": "设备实时画面 / Device Live View",
+          "type": "provider_preview",
+          "tabs": [
+            "Android",
+            "Windows",
+            "Browser",
+            "API"
+          ],
+          "default_tab": "Android",
+          "metadata": {
+            "设备名": "Pixel 6 Pro",
+            "分辨率": "1440 × 3120",
+            "电量": "78%",
+            "包名": "com.taobao.taobao",
+            "Activity": "com.taobao.home.MainActivity"
+          },
+          "preview_modes": {
+            "Android": "phone_mirror_mock",
+            "Windows": "window_preview_mock",
+            "Browser": "browser_snapshot_mock",
+            "API": "request_response_mock"
+          },
+          "toolbar_buttons": [
+            {
+              "label": "截图",
+              "action": "capture_keyframe"
+            },
+            {
+              "label": "读取 UI 树",
+              "action": "read_ui_tree"
+            },
+            {
+              "label": "点击模式",
+              "action": "toggle_click_mode",
+              "variant": "active"
+            },
+            {
+              "label": "单步执行",
+              "action": "run_next_step"
+            },
+            {
+              "label": "录制中 00:12:47",
+              "action": "toggle_recording",
+              "variant": "recording"
+            }
+          ],
+          "other_sessions": [
+            {
+              "label": "Windows 桌面",
+              "provider": "windows_uia",
+              "status": "online"
+            },
+            {
+              "label": "Browser 会话",
+              "provider": "playwright_browser",
+              "status": "online"
+            },
+            {
+              "label": "API Worker",
+              "provider": "api_worker",
+              "status": "online"
+            }
+          ]
+        },
+        {
+          "id": "recording_flow",
+          "title": "录制工作流 / Recording Flow",
+          "type": "vertical_state_machine",
+          "states": [
+            {
+              "id": "CONNECT_PROVIDER",
+              "label": "连接 Provider",
+              "status": "done"
+            },
+            {
+              "id": "SCREEN_OBSERVED",
+              "label": "识别页面",
+              "status": "done"
+            },
+            {
+              "id": "ANCHOR_LOCATED",
+              "label": "锚点定位",
+              "status": "done"
+            },
+            {
+              "id": "OCR_UI_VERIFIED",
+              "label": "OCR/UI树校验",
+              "status": "done"
+            },
+            {
+              "id": "ACTION_GENERATED",
+              "label": "生成动作",
+              "status": "current",
+              "description": "Step 3: 输入文本 input_text"
+            },
+            {
+              "id": "SAFETY_CHECK",
+              "label": "安全检查",
+              "status": "pending"
+            },
+            {
+              "id": "TRACE_WRITTEN",
+              "label": "写入 Trace",
+              "status": "pending"
+            },
+            {
+              "id": "WORKFLOW_GENERATED",
+              "label": "生成 Workflow",
+              "status": "pending"
+            },
+            {
+              "id": "DONE",
+              "label": "Done",
+              "status": "pending"
+            }
+          ],
+          "strategy_card": {
+            "title": "稳定录制策略",
+            "items": [
+              "OCR 优先，减少坐标依赖",
+              "fallback_area 多区域回退定位",
+              "关键步骤保存 keyframe 截图",
+              "高风险动作进入安全审批",
+              "未知 action 直接拒绝"
+            ],
+            "stability_score": 98
+          }
+        },
+        {
+          "id": "action_inspector",
+          "title": "动作检查器 / Action Inspector",
+          "type": "action_detail",
+          "fields": [
+            "step_id",
+            "provider",
+            "action_type",
+            "target_element",
+            "resource_id",
+            "text",
+            "confidence",
+            "wait_condition",
+            "timeout",
+            "retry",
+            "risk_level",
+            "approval"
+          ],
+          "current_step": {
+            "step_id": "Step 3",
+            "provider": "android_adb",
+            "action_type": "输入文本 input_text",
+            "target_element": "搜索框 EditText",
+            "resource_id": "com.taobao.taobao:id/searchEdit",
+            "text": "连衣裙夏季",
+            "confidence": 0.98,
+            "risk_level": "L1 低风险"
+          },
+          "json_preview": true,
+          "screenshot_thumbnails": [
+            "执行前截图",
+            "执行后截图"
+          ],
+          "bridge_inspector": [
+            "OpenChronicle API",
+            "Provider Registry",
+            "android_adb",
+            "Trace Writer"
+          ]
+        },
+        {
+          "id": "timeline_logs",
+          "title": "时间线与日志（32 步）",
+          "type": "table",
+          "columns": [
+            "步骤",
+            "时间",
+            "Provider",
+            "动作",
+            "页面状态 / 元素",
+            "结果",
+            "耗时"
+          ],
+          "interactions": [
+            "点击 Step 更新 Action Inspector",
+            "筛选 Provider",
+            "搜索动作/元素/结果",
+            "导出日志"
+          ]
+        },
+        {
+          "id": "workflow_skill_builder",
+          "title": "Workflow / Skill Builder",
+          "type": "form_table",
+          "outputs": [
+            "workflow.json",
+            "skill.yaml"
+          ],
+          "fields": [
+            "技能名称",
+            "技能描述"
+          ],
+          "params": [
+            "keyword",
+            "category",
+            "page"
+          ],
+          "actions": [
+            "预览 Skill YAML",
+            "生成 Skill"
+          ]
+        },
+        {
+          "id": "safety_approval",
+          "title": "安全审批（6）",
+          "type": "approval_table",
+          "items": [
+            "安装 APK",
+            "清除数据",
+            "支付页面检测",
+            "获取通讯录",
+            "发送短信",
+            "访问剪贴板"
+          ],
+          "actions": [
+            "批准",
+            "拒绝"
+          ]
+        }
+      ]
+    },
+    "provider_workflow_studio": {
+      "route": "/rpa/providers",
+      "title": "RPA Provider 管理与 Workflow Studio",
+      "active_nav": "RPA Provider 管理",
+      "purpose": "集中管理 RPA Provider、桥接拓扑、Workflow 库、录制编辑和 Skill 版本。",
+      "kpi_cards": [
+        {
+          "title": "在线 Provider",
+          "value": "4 / 6",
+          "subtitle": "在线率 66.7%",
+          "icon": "Users"
+        },
+        {
+          "title": "设备健康度",
+          "value": "96.4%",
+          "subtitle": "较昨日 ↑ 2.1%",
+          "icon": "Activity"
+        },
+        {
+          "title": "近7日运行数",
+          "value": "1,284",
+          "subtitle": "较上周 ↑ 18.6%",
+          "icon": "Run"
+        },
+        {
+          "title": "平均恢复率",
+          "value": "94.2%",
+          "subtitle": "较上周 ↑ 3.4%",
+          "icon": "RefreshCcw"
+        },
+        {
+          "title": "待同步 Skills",
+          "value": "23",
+          "subtitle": "较昨日 ↓ 2",
+          "icon": "PackageCheck"
+        }
+      ],
+      "panels": [
+        {
+          "id": "provider_registry",
+          "title": "Provider Registry",
+          "type": "provider_card_grid",
+          "providers": [
+            {
+              "name": "android_adb",
+              "platform": "Android",
+              "status": "online",
+              "manifest": "v1.2.1",
+              "actions": 142,
+              "observe": [
+                "OCR",
+                "截图",
+                "层级树"
+              ],
+              "success_rate": 98.6
+            },
+            {
+              "name": "windows_uia",
+              "platform": "Windows",
+              "status": "online",
+              "manifest": "v1.3.0",
+              "actions": 128,
+              "observe": [
+                "UIA",
+                "OCR",
+                "截图"
+              ],
+              "success_rate": 97.1
+            },
+            {
+              "name": "playwright_browser",
+              "platform": "Browser",
+              "status": "online",
+              "manifest": "v1.4.2",
+              "actions": 96,
+              "observe": [
+                "DOM",
+                "OCR",
+                "截图"
+              ],
+              "success_rate": 95.7
+            },
+            {
+              "name": "api_worker",
+              "platform": "API Worker",
+              "status": "online",
+              "manifest": "v1.1.0",
+              "actions": 76,
+              "observe": [
+                "日志",
+                "HTTP",
+                "结构化"
+              ],
+              "success_rate": 97.8
+            },
+            {
+              "name": "ios_wda",
+              "platform": "iOS",
+              "status": "reserved",
+              "manifest": "v0.0.0",
+              "actions": 0,
+              "observe": [],
+              "success_rate": null
+            },
+            {
+              "name": "harmony_hdc",
+              "platform": "HarmonyOS",
+              "status": "reserved",
+              "manifest": "v0.0.0",
+              "actions": 0,
+              "observe": [],
+              "success_rate": null
+            }
+          ],
+          "actions": [
+            "测试连接",
+            "查看 manifest",
+            "启用/禁用"
+          ]
+        },
+        {
+          "id": "bridge_topology",
+          "title": "Bridge Topology / 桥接拓扑",
+          "type": "flow_diagram",
+          "nodes": [
+            "UI Console",
+            "OpenChronicle API",
+            "Provider Registry",
+            "Adapter Layer",
+            "Device / Browser / Worker",
+            "Trace Writer",
+            "Memory Center",
+            "Skill Builder"
+          ],
+          "edges": [
+            [
+              "UI Console",
+              "OpenChronicle API"
+            ],
+            [
+              "OpenChronicle API",
+              "Provider Registry"
+            ],
+            [
+              "Provider Registry",
+              "Adapter Layer"
+            ],
+            [
+              "Adapter Layer",
+              "Device / Browser / Worker"
+            ],
+            [
+              "Device / Browser / Worker",
+              "Trace Writer"
+            ],
+            [
+              "Trace Writer",
+              "Memory Center"
+            ],
+            [
+              "Trace Writer",
+              "Skill Builder"
+            ]
+          ],
+          "health_labels": true
+        },
+        {
+          "id": "provider_detail",
+          "title": "Provider Detail / android_adb",
+          "type": "manifest_viewer",
+          "fields": {
+            "provider_name": "android_adb",
+            "adapter_path": "adapters/android/adb_bridge",
+            "safety_level": "high",
+            "observe_modes": [
+              "keyframe",
+              "region",
+              "full"
+            ],
+            "current_devices": "3 台在线 / 1 台离线",
+            "heartbeat": "12s 前"
+          },
+          "manifest_preview": true,
+          "copy_button": true
+        },
+        {
+          "id": "workflow_library",
+          "title": "Workflow 库",
+          "type": "workflow_table",
+          "columns": [
+            "名称",
+            "schema_version",
+            "provider",
+            "platform",
+            "steps",
+            "success_rate",
+            "last_run",
+            "操作"
+          ],
+          "rows": [
+            "android_open_app",
+            "taobao_search_product",
+            "browser_login_flow",
+            "windows_export_report",
+            "api_fetch_and_store"
+          ],
+          "actions": [
+            "验证",
+            "运行",
+            "编辑 JSON",
+            "生成 Skill"
+          ]
+        },
+        {
+          "id": "recording_editing_studio",
+          "title": "录制与编辑 Studio",
+          "type": "workflow_step_editor",
+          "controls": [
+            "开始录制",
+            "插入步骤",
+            "条件分支",
+            "重试策略",
+            "预览 JSON",
+            "保存 Workflow"
+          ],
+          "steps": [
+            "launch_app",
+            "tap_text",
+            "type",
+            "verify_ocr",
+            "safety_check",
+            "write_trace"
+          ],
+          "stable_recording_rules": [
+            "OCR 优先，减少坐标依赖",
+            "失败时使用 fallback_area",
+            "关键帧 keyframe 截图保留",
+            "schema_version 固定为 1.0",
+            "未知动作 unknown 直接拒绝",
+            "建议开启自动重试与安全检查"
+          ]
+        },
+        {
+          "id": "skill_output_version",
+          "title": "Skill 输出与版本",
+          "type": "skill_version_panel",
+          "outputs": [
+            "YAML",
+            "JSON"
+          ],
+          "fields": [
+            "Skill 名称",
+            "描述",
+            "Schema Version",
+            "Provider",
+            "最新版本"
+          ],
+          "version_history": [
+            "v1.2.0",
+            "v1.1.0",
+            "v1.0.0",
+            "v0.9.0"
+          ],
+          "actions": [
+            "发布 Skill",
+            "导出 JSON"
+          ]
+        }
+      ]
+    },
+    "device_fleet": {
+      "route": "/rpa/devices",
+      "title": "设备舰队",
+      "active_nav": "设备舰队",
+      "purpose": "统一管理 Android 设备、Windows 桌面、Browser session 和 API worker。",
+      "table_columns": [
+        "device_id",
+        "provider",
+        "platform",
+        "status",
+        "current_app_window_url",
+        "last_heartbeat",
+        "current_task",
+        "risk_level",
+        "actions"
+      ],
+      "actions": [
+        "连接",
+        "断开",
+        "打开调试",
+        "查看日志"
+      ]
+    },
+    "workflow_library_page": {
+      "route": "/rpa/workflows",
+      "title": "Workflow 库",
+      "active_nav": "Workflow 库",
+      "purpose": "管理 workflow.json 文件，支持验证、运行、编辑 JSON、生成 Skill 和版本记录。",
+      "features": [
+        "validate_workflow",
+        "run_workflow",
+        "edit_json",
+        "generate_skill",
+        "version_history"
+      ]
+    }
+  },
+  "data_models": {
+    "RPAProvider": {
+      "name": "string",
+      "platform": "android | windows | browser | api | ios | harmonyos",
+      "status": "online | offline | error | reserved",
+      "manifest_version": "string",
+      "adapter_path": "string",
+      "safety_level": "low | medium | high",
+      "actions": "string[]",
+      "observe_modes": "keyframe | region | full | ui_tree | dom | window_tree | logs",
+      "success_rate": "number"
+    },
+    "RPADevice": {
+      "device_id": "string",
+      "provider": "string",
+      "platform": "string",
+      "status": "online | offline | busy | error",
+      "current_target": "app package | window title | url | api endpoint",
+      "last_heartbeat": "ISO datetime",
+      "current_task": "string | null",
+      "risk_level": "L0 | L1 | L2 | L3"
+    },
+    "RPAWorkflow": {
+      "schema_version": "1.0",
+      "id": "string",
+      "name": "string",
+      "provider": "string",
+      "platform": "string",
+      "inputs": "Record<string, WorkflowInput>",
+      "steps": "WorkflowStep[]",
+      "failure_policy": "object",
+      "memory": "object"
+    },
+    "RPARun": {
+      "task_id": "string",
+      "workflow_id": "string",
+      "provider": "string",
+      "status": "running | success | failed | waiting_approval | stopped",
+      "started_at": "ISO datetime",
+      "finished_at": "ISO datetime | null",
+      "current_step": "string"
+    },
+    "RPATraceStep": {
+      "task_id": "string",
+      "workflow_id": "string",
+      "provider": "string",
+      "step_id": "string",
+      "timestamp": "ISO datetime",
+      "observation": "object",
+      "action": "object",
+      "result": "object",
+      "safety": "object"
+    },
+    "SafetyApproval": {
+      "id": "string",
+      "action": "string",
+      "provider": "string",
+      "risk_level": "L1 | L2 | L3",
+      "reason": "string",
+      "status": "pending | approved | rejected",
+      "created_at": "ISO datetime"
+    },
+    "GeneratedSkill": {
+      "name": "string",
+      "version": "string",
+      "source_workflow_id": "string",
+      "provider": "string",
+      "format": "skill.yaml | workflow.json",
+      "status": "draft | published"
+    }
+  },
+  "api_contract": {
+    "base_url": "/api/rpa",
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/providers",
+        "description": "获取 provider registry"
+      },
+      {
+        "method": "GET",
+        "path": "/providers/:name",
+        "description": "获取 provider manifest 和详情"
+      },
+      {
+        "method": "POST",
+        "path": "/providers/:name/test",
+        "description": "测试 provider 连接"
+      },
+      {
+        "method": "GET",
+        "path": "/devices",
+        "description": "获取设备/会话/worker 列表"
+      },
+      {
+        "method": "POST",
+        "path": "/workflows/validate",
+        "description": "校验 workflow.json"
+      },
+      {
+        "method": "POST",
+        "path": "/workflows/run",
+        "description": "运行 workflow"
+      },
+      {
+        "method": "GET",
+        "path": "/runs/:task_id",
+        "description": "获取执行状态"
+      },
+      {
+        "method": "GET",
+        "path": "/traces/:task_id",
+        "description": "获取 trace step 列表"
+      },
+      {
+        "method": "POST",
+        "path": "/approvals/:id/approve",
+        "description": "批准安全审批"
+      },
+      {
+        "method": "POST",
+        "path": "/approvals/:id/reject",
+        "description": "拒绝安全审批"
+      },
+      {
+        "method": "POST",
+        "path": "/skills/generate",
+        "description": "从 trace/workflow 生成 skill"
+      }
+    ],
+    "mock_first": true,
+    "realtime": {
+      "transport": "WebSocket 或 Server-Sent Events",
+      "events": [
+        "provider_status_changed",
+        "device_heartbeat",
+        "run_started",
+        "step_completed",
+        "approval_required",
+        "trace_written",
+        "skill_generated"
+      ]
+    }
+  },
+  "frontend_implementation": {
+    "stack": [
+      "React",
+      "TypeScript",
+      "Vite",
+      "Tailwind CSS",
+      "shadcn/ui",
+      "lucide-react",
+      "recharts"
+    ],
+    "state": "Zustand 或 React Context",
+    "suggested_files": [
+      "src/pages/rpa/RealtimeDebugConsole.tsx",
+      "src/pages/rpa/ProviderWorkflowStudio.tsx",
+      "src/pages/rpa/DeviceFleetPage.tsx",
+      "src/pages/rpa/WorkflowLibraryPage.tsx",
+      "src/components/layout/Sidebar.tsx",
+      "src/components/layout/Topbar.tsx",
+      "src/components/dashboard/KpiCard.tsx",
+      "src/components/rpa/ProviderSwitcher.tsx",
+      "src/components/rpa/DeviceLiveView.tsx",
+      "src/components/rpa/RecordingFlow.tsx",
+      "src/components/rpa/ActionInspector.tsx",
+      "src/components/rpa/BridgeInspector.tsx",
+      "src/components/rpa/ProviderRegistry.tsx",
+      "src/components/rpa/BridgeTopology.tsx",
+      "src/components/rpa/ProviderDetail.tsx",
+      "src/components/rpa/TimelineLog.tsx",
+      "src/components/rpa/WorkflowSkillBuilder.tsx",
+      "src/components/rpa/SafetyApproval.tsx",
+      "src/components/rpa/WorkflowLibrary.tsx",
+      "src/components/rpa/RecordingEditStudio.tsx",
+      "src/components/rpa/SkillOutputVersion.tsx",
+      "src/mock/rpaHarnessMock.ts",
+      "src/types/rpa.ts",
+      "src/lib/rpaApi.ts"
+    ],
+    "codex_rules": [
+      "先用 mock 数据实现，不接真实 ADB / UIA / Playwright",
+      "不要把所有代码堆到一个页面文件",
+      "保留现有视觉风格，但升级为多 RPA 控制台",
+      "所有核心文案使用中文",
+      "Provider selector 必须能切换预览类型",
+      "点击时间线 Step 必须更新 Action Inspector",
+      "Workflow Studio 中步骤编辑要能增删改 mock step",
+      "审批批准/拒绝要更新状态并写入 mock timeline",
+      "npm build 必须通过"
+    ]
+  },
+  "interaction_requirements": [
+    "点击左侧导航可在实时调试、Provider 管理、设备舰队、Workflow 库之间切换。",
+    "Provider selector 切换 Android / Windows / Browser / API 时，Device Live View 预览模式同步切换。",
+    "点击时间线 Step，Action Inspector 显示对应 step 的 action JSON 和截图缩略图。",
+    "点击单步执行，Recording Flow 推进一步，并新增 timeline 日志。",
+    "点击截图，只生成 keyframe mock，不默认全屏连续截图。",
+    "点击读取 UI 树，展示 mock UI tree / DOM / window tree。",
+    "Workflow Studio 支持插入步骤、编辑步骤、删除步骤、预览 JSON、保存 workflow。",
+    "Provider Registry 支持测试连接、查看 manifest、启用/禁用 mock 状态。",
+    "安全审批批准/拒绝后，审批列表状态变化，并写入 timeline。",
+    "生成 Skill 后在 Skill 输出与版本中新增版本记录。"
+  ],
+  "acceptance_criteria": [
+    "页面整体风格与参考图一致，保持企业级、高保真、清爽、蓝色主色。",
+    "实时调试页不再写死 Android，必须有 Android / Windows / Browser / API 切换。",
+    "RPA Provider 管理页必须展示 provider registry、bridge topology、provider detail、workflow 库、录制编辑 studio、skill 版本。",
+    "必须展示 android_adb、windows_uia、playwright_browser、api_worker、ios_wda、harmony_hdc。",
+    "必须体现 Bridge Inspector 或 Bridge Topology，说明 UI 到后端 provider 的桥接链路。",
+    "必须体现稳定录制策略：OCR 优先、fallback_area、keyframe、schema_version 1.0、安全审批、unknown action reject。",
+    "必须支持 mock 数据渲染，不依赖真实后端。",
+    "必须支持基础交互：时间线切换 Inspector、Provider 切换预览、审批批准/拒绝、Workflow 编辑、生成 Skill。",
+    "代码结构清晰，可后续接入真实 OpenChronicle RPA API。",
+    "npm build / TypeScript check 通过。"
+  ],
+  "codex_handoff": {
+    "primary_prompt": "请读取 openchronicle_rpa_harness_ui_spec_v2.json 和 openchronicle_rpa_harness_codex_handoff_v2.md，基于 mock 数据实现 OpenChronicle RPA Harness 多 Provider 控制台。重点实现实时调试控制台和 RPA Provider 管理与 Workflow Studio 两个页面。",
+    "must_not": [
+      "不要接真实 ADB",
+      "不要修改无关后端文件",
+      "不要删除现有 RPA Harness 后端代码",
+      "不要写死只有 Android 的 UI",
+      "不要忽略安全审批和 trace/log 交互"
+    ],
+    "final_report_required": [
+      "新增文件列表",
+      "修改文件列表",
+      "页面截图或本地运行地址",
+      "npm build 结果",
+      "未完成项"
+    ]
+  },
+  "generated_at": "2026-04-27T11:03:23"
+}

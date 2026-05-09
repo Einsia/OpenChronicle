@@ -177,6 +177,27 @@ def list_active(conn: sqlite3.Connection) -> list[SessionRow]:
     return [_to_row(r) for r in rows]
 
 
+def next_session_start_after(
+    conn: sqlite3.Connection, start_time: datetime
+) -> datetime | None:
+    """Earliest ``start_time`` of any session that began after ``start_time``.
+
+    Used by the orphan recovery path to bound an orphan's inferred
+    end_time: blocks past the *next* session's start can't belong to
+    this one, regardless of the orphan's max_session_hours window.
+    """
+    row = conn.execute(
+        "SELECT MIN(start_time) FROM sessions WHERE start_time > ?",
+        (start_time.isoformat(),),
+    ).fetchone()
+    if not row or not row[0]:
+        return None
+    try:
+        return datetime.fromisoformat(row[0])
+    except (TypeError, ValueError):
+        return None
+
+
 def list_due_for_retry(conn: sqlite3.Connection, *, now: datetime) -> list[SessionRow]:
     rows = conn.execute(
         """

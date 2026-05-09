@@ -99,6 +99,34 @@ def get_latest_end(conn: sqlite3.Connection) -> datetime | None:
         return None
 
 
+def latest_end_in_window(
+    conn: sqlite3.Connection, start: datetime, end: datetime
+) -> datetime | None:
+    """Latest ``end_time`` of any block whose ``start_time`` falls in ``[start, end)``.
+
+    Used by the orphan-session recovery path: an active session left
+    behind by a hard crash needs an inferred end_time, and the freshest
+    persisted block within the session's plausible lifetime is the best
+    available estimate.
+    """
+    row = conn.execute(
+        """
+        SELECT end_time FROM timeline_blocks
+         WHERE start_time >= ?
+           AND start_time <  ?
+         ORDER BY end_time DESC
+         LIMIT 1
+        """,
+        (start.isoformat(), end.isoformat()),
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        return datetime.fromisoformat(row[0])
+    except (TypeError, ValueError):
+        return None
+
+
 def query_recent(conn: sqlite3.Connection, *, limit: int = 12) -> list[TimelineBlock]:
     """Most recent blocks, oldest first in the returned list."""
     rows = conn.execute(

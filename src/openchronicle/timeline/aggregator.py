@@ -44,6 +44,12 @@ def _capture_stem_in_window(stem: str, start: datetime, end: datetime) -> bool:
     ts = _stem_to_dt(stem)
     if ts is None:
         return False
+    if ts.tzinfo is None:
+        ts = ts.astimezone()
+    if start.tzinfo is None:
+        start = start.astimezone()
+    if end.tzinfo is None:
+        end = end.astimezone()
     return start <= ts < end
 
 

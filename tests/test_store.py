@@ -1,5 +1,7 @@
 import os
+import sqlite3
 import threading
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,6 +11,8 @@ from openchronicle.config import Config
 from openchronicle.store import entries as entries_mod
 from openchronicle.store import files as files_mod
 from openchronicle.store import fts, index_md
+from openchronicle.timeline import aggregator
+from openchronicle.timeline import store as tl_store
 from openchronicle.writer import compact as compact_mod
 
 
@@ -375,3 +379,73 @@ def test_compact_skips_if_file_changes_during_llm_rewrite(ac_root: Path) -> None
     bodies = "\n".join(e.body for e in parsed.entries)
     assert "ConcurrentAppendToken" in bodies
     assert parsed.needs_compact is True
+
+
+# ---------------------------------------------------------------------------
+# Timeline store: naive vs aware datetime
+# ---------------------------------------------------------------------------
+
+
+def _insert_block_raw(conn: sqlite3.Connection, start: str, end: str) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO timeline_blocks"
+        " (id, start_time, end_time, timezone, entries, apps_used, capture_count, created_at)"
+        " VALUES (?, ?, ?, '', '[]', '[]', 0, ?)",
+        (f"tlb-test-{start}", start, end, datetime.now().astimezone().isoformat()),
+    )
+
+
+def test_get_latest_end_naive_string_returns_aware(ac_root: Path) -> None:
+    """A block stored without TZ offset must come back as offset-aware."""
+    with fts.cursor() as conn:
+        _insert_block_raw(conn, "2026-04-28T12:00:00", "2026-04-28T12:01:00")
+        result = tl_store.get_latest_end(conn)
+    assert result is not None
+    assert result.tzinfo is not None
+
+
+def test_get_latest_end_aware_string_stays_aware(ac_root: Path) -> None:
+    """A block stored with TZ offset must remain offset-aware."""
+    with fts.cursor() as conn:
+        _insert_block_raw(
+            conn,
+            "2026-04-28T12:00:00+08:00",
+            "2026-04-28T12:01:00+08:00",
+        )
+        result = tl_store.get_latest_end(conn)
+    assert result is not None
+    assert result.tzinfo is not None
+
+
+def test_get_latest_end_no_rows(ac_root: Path) -> None:
+    with fts.cursor() as conn:
+        assert tl_store.get_latest_end(conn) is None
+
+
+def test_row_to_block_naive_datetime_becomes_aware(ac_root: Path) -> None:
+    """Blocks read back via query_recent must always be offset-aware."""
+    with fts.cursor() as conn:
+        _insert_block_raw(conn, "2026-04-28T14:00:00", "2026-04-28T14:01:00")
+        blocks = tl_store.query_recent(conn, limit=1)
+    assert len(blocks) == 1
+    assert blocks[0].start_time.tzinfo is not None
+    assert blocks[0].end_time.tzinfo is not None
+
+
+def test_capture_stem_in_window_naive_start_end() -> None:
+    """_capture_stem_in_window must not crash when given naive datetimes."""
+    stem = "2026-04-28T14-05-30p08-00"
+    naive_start = datetime.fromisoformat("2026-04-28T14:05:00")
+    naive_end = datetime.fromisoformat("2026-04-28T14:06:00")
+    assert aggregator._capture_stem_in_window(stem, naive_start, naive_end) is True
+    assert aggregator._capture_stem_in_window(stem, naive_end, naive_end) is False
+
+
+def test_capture_stem_in_window_naive_stem() -> None:
+    """A stem without TZ offset yields a naive datetime — must still not crash."""
+    # 21 chars, no 'p'/'m' offset prefix → _stem_to_dt returns naive datetime
+    naive_stem = "2026-04-28T14-05-30_XX"
+    aware_start = datetime.fromisoformat("2026-04-28T14:05:00").astimezone()
+    aware_end = datetime.fromisoformat("2026-04-28T14:06:00").astimezone()
+    assert aggregator._capture_stem_in_window(naive_stem, aware_start, aware_end) is True
+    assert aggregator._capture_stem_in_window(naive_stem, aware_end, aware_end) is False

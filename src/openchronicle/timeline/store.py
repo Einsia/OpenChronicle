@@ -94,7 +94,10 @@ def get_latest_end(conn: sqlite3.Connection) -> datetime | None:
     if not row:
         return None
     try:
-        return datetime.fromisoformat(row[0])
+        dt = datetime.fromisoformat(row[0])
+        if dt.tzinfo is None:
+            dt = dt.astimezone()
+        return dt
     except (TypeError, ValueError):
         return None
 
@@ -122,10 +125,16 @@ def query_since(conn: sqlite3.Connection, since: datetime) -> list[TimelineBlock
 def _row_to_block(row: sqlite3.Row | tuple) -> TimelineBlock:
     # Row indexing works for both sqlite3.Row and tuple
     get = row.__getitem__
+    start = datetime.fromisoformat(get("start_time"))
+    end = datetime.fromisoformat(get("end_time"))
+    if start.tzinfo is None:
+        start = start.astimezone()
+    if end.tzinfo is None:
+        end = end.astimezone()
     return TimelineBlock(
         id=get("id"),
-        start_time=datetime.fromisoformat(get("start_time")),
-        end_time=datetime.fromisoformat(get("end_time")),
+        start_time=start,
+        end_time=end,
         timezone=get("timezone") or "",
         entries=json.loads(get("entries") or "[]"),
         apps_used=json.loads(get("apps_used") or "[]"),

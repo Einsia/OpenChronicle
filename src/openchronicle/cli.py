@@ -925,9 +925,8 @@ def rebuild_captures_index() -> None:
     file_ids = {p.stem for p in files}
     with fts.cursor() as conn:
         rows = conn.execute("SELECT id FROM captures").fetchall()
-        for row in rows:
-            if row["id"] not in file_ids:
-                fts.delete_capture(conn, row["id"])
+    stale_ids = [row["id"] for row in rows if row["id"] not in file_ids]
+    _delete_capture_rows(stale_ids)
 
     if not files:
         console.print("[yellow]capture-buffer is empty; nothing to rebuild.[/yellow]")
@@ -999,6 +998,28 @@ def _warn_if_running() -> None:
         )
 
 
+def _delete_capture_rows(capture_ids: list[str]) -> None:
+    """Delete capture rows in one explicit transaction.
+
+    fts.connect uses autocommit mode, so sqlite3's connection context manager
+    does not open a transaction for us here.
+    """
+    if not capture_ids:
+        return
+    with fts.cursor() as conn:
+        conn.execute("BEGIN")
+        try:
+            conn.executemany(
+                "DELETE FROM captures WHERE id=?",
+                ((capture_id,) for capture_id in capture_ids),
+            )
+            conn.execute("COMMIT")
+        except Exception:  # noqa: BLE001
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
+
+
 def _clean_captures() -> int:
     buf = paths.capture_buffer_dir()
     if not buf.exists():
@@ -1010,10 +1031,7 @@ def _clean_captures() -> int:
             p.unlink()
             removed_stems.append(p.stem)
             n += 1
-    if removed_stems:
-        with fts.cursor() as conn:
-            for stem in removed_stems:
-                fts.delete_capture(conn, stem)
+    _delete_capture_rows(removed_stems)
     return n
 
 

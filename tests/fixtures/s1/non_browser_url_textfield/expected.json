@@ -1,0 +1,12 @@
+{
+  "focused_element": {
+    "role": "AXTextField",
+    "title": "",
+    "value": "https://example.com",
+    "is_editable": true,
+    "has_value": true,
+    "value_length": 19
+  },
+  "visible_text": "## Notes [active]\n_com.apple.Notes_\n### Notes\n- [TextField] https://example.com",
+  "url": null
+}

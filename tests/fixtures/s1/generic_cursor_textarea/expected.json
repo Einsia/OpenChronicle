@@ -1,0 +1,12 @@
+{
+  "focused_element": {
+    "role": "AXTextArea",
+    "title": "editor",
+    "value": "def enrich(capture):\n    ...",
+    "is_editable": true,
+    "has_value": true,
+    "value_length": 28
+  },
+  "visible_text": "## Cursor [active]\n_com.todesktop.230313mzl4w4u92_\n### s1_parser.py\n- [TextArea] editor — def enrich(capture):\n    ...",
+  "url": null
+}

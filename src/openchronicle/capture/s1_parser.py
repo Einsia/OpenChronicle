@@ -9,27 +9,28 @@ Ported from Einsia-Partner's S1 extraction (``s1_collector`` —
 ``_extract_focused_element`` / ``_render_visible_text`` / ``_extract_url``).
 Runs inline inside ``capture_once`` so every capture-buffer JSON carries
 these fields.
+
+Architecture
+------------
+
+``enrich()`` computes a **generic baseline** (focused element + visible text
++ url=None) and then runs registered app parsers in priority order.  Each
+parser may selectively override fields via an ``S1Patch``.  This lets future
+parsers compose — for example a Linear parser can match ``linear.app`` in
+the URL that the browser parser already extracted.
 """
 
 from __future__ import annotations
 
-import re
-from dataclasses import asdict, dataclass
 from typing import Any
 
+# Import triggers builtin parser registration.
+from .app_parsers import apply_parsers
+from .app_parsers.base import FocusedElement, ParseContext, S1Fields
 from .ax_models import ax_app_to_markdown
 
-_BROWSER_BUNDLES = {
-    "com.google.Chrome",
-    "com.apple.Safari",
-    "org.mozilla.firefox",
-    "com.microsoft.edgemac",
-    "company.thebrowser.Browser",
-    "com.brave.Browser",
-    "com.operasoftware.Opera",
-}
-
-_URL_RE = re.compile(r"https?://\S+")
+# Re-export for tests and downstream code that imports from here.
+__all__ = ["FocusedElement", "enrich"]
 
 _EDITABLE_ROLES = {"AXTextField", "AXTextArea", "AXComboBox"}
 _STATIC_ROLES = {"AXStaticText", "AXWebArea"}
@@ -37,23 +38,6 @@ _STATIC_ROLES = {"AXStaticText", "AXWebArea"}
 _VISIBLE_TEXT_MAX = 10_000
 _FOCUS_TITLE_MAX = 200
 _FOCUS_VALUE_MAX = 2_000
-
-
-@dataclass
-class FocusedElement:
-    role: str = ""
-    title: str = ""
-    value: str = ""
-    is_editable: bool = False
-    has_value: bool = False
-    value_length: int = 0
-
-    def to_dict(self) -> dict[str, Any]:
-        d = asdict(self)
-        stripped = (self.value or "").strip()
-        d["has_value"] = bool(stripped)
-        d["value_length"] = len(stripped)
-        return d
 
 
 def enrich(capture: dict[str, Any]) -> None:
@@ -72,9 +56,27 @@ def enrich(capture: dict[str, Any]) -> None:
         capture["url"] = None
         return
 
-    capture["focused_element"] = _extract_focused_element(app_data).to_dict()
-    capture["visible_text"] = _render_visible_text(app_data)
-    capture["url"] = _extract_url(app_data)
+    # ── Generic baseline ──────────────────────────────────────────────
+    fields = S1Fields(
+        focused_element=_extract_focused_element(app_data),
+        visible_text=_render_visible_text(app_data),
+        url=None,
+    )
+
+    # ── App-parser patches ────────────────────────────────────────────
+    ctx = ParseContext(
+        capture=capture,
+        app=app_data,
+        window_meta=capture.get("window_meta") or {},
+    )
+    apply_parsers(ctx, fields)
+
+    # ── Write back ────────────────────────────────────────────────────
+    capture["focused_element"] = fields.focused_element.to_dict()
+    capture["visible_text"] = fields.visible_text
+    capture["url"] = fields.url
+    if fields.app_context:
+        capture["app_context"] = fields.app_context
 
 
 def _frontmost_app(ax_tree: dict[str, Any]) -> dict[str, Any] | None:
@@ -113,21 +115,3 @@ def _render_visible_text(app_data: dict[str, Any]) -> str:
     if len(md) > _VISIBLE_TEXT_MAX:
         md = md[:_VISIBLE_TEXT_MAX] + "\n...(truncated)"
     return md
-
-
-def _extract_url(app_data: dict[str, Any]) -> str | None:
-    bundle = app_data.get("bundle_id", "")
-    if bundle not in _BROWSER_BUNDLES:
-        return None
-    for window in app_data.get("windows", []):
-        for el in window.get("elements", []):
-            if el.get("role") != "AXTextField":
-                continue
-            value = (el.get("value") or "").strip()
-            if not value:
-                continue
-            if _URL_RE.search(value):
-                return value
-            if "." in value and " " not in value:
-                return f"https://{value}"
-    return None

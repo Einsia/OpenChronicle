@@ -1,0 +1,24 @@
+{
+  "ax_tree": {
+    "apps": [
+      {
+        "name": "Google Chrome",
+        "bundle_id": "com.google.Chrome",
+        "is_frontmost": true,
+        "windows": [
+          {
+            "title": "Anthropic — Claude Code",
+            "focused": true,
+            "elements": [
+              {
+                "role": "AXTextField",
+                "title": "Address and search bar",
+                "value": "https://www.anthropic.com/news"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

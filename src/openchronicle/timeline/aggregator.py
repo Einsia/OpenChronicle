@@ -143,6 +143,20 @@ def _format_events(parsed: list[tuple[Path, dict]]) -> tuple[str, list[str]]:
         if url:
             parts.append(f"(URL: {url})")
 
+        # App-specific S1 fields — compact hints for the timeline LLM.
+        editor_file = data.get("editor_file")
+        if editor_file:
+            parts.append(f"(file: {editor_file})")
+        editor_project = data.get("editor_project")
+        if editor_project:
+            parts.append(f"(project: {editor_project})")
+        editor_branch = data.get("editor_git_branch")
+        if editor_branch:
+            parts.append(f"(git: {editor_branch})")
+        terminal_cwd = data.get("terminal_cwd")
+        if terminal_cwd:
+            parts.append(f"(cwd: {terminal_cwd})")
+
         fe = data.get("focused_element") or {}
         role = str(fe.get("role") or "")
         if role:

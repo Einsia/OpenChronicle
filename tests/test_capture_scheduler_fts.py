@@ -5,8 +5,11 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 from openchronicle.capture import scheduler as scheduler_mod
+from openchronicle.capture import window_meta
+from openchronicle.config import CaptureConfig
 from openchronicle.store import fts
 
 
@@ -111,3 +114,91 @@ def test_cleanup_eviction_also_drops_fts(ac_root: Path) -> None:
     assert len(remaining) == 3 - stats["evicted"]
     # Newest survives.
     assert written[-1].stem in remaining
+
+
+# ---------------------------------------------------------------------------
+# Capture exclusion rules
+# ---------------------------------------------------------------------------
+
+
+class _FakeProvider:
+    available = False
+
+
+def _exclusion_cfg(**overrides) -> CaptureConfig:
+    defaults = dict(
+        include_screenshot=False,
+        excluded_window_title_patterns=[],
+        excluded_app_names=[],
+        excluded_bundle_ids=[],
+    )
+    defaults.update(overrides)
+    return CaptureConfig(**defaults)
+
+
+def test_excluded_app_name_skips_capture(ac_root: Path) -> None:
+    cfg = _exclusion_cfg(excluded_app_names=["Signal"])
+    fake_meta = window_meta.WindowMeta(app_name="Signal", title="Chat", bundle_id="org.signal.desktop")
+    with patch("openchronicle.capture.scheduler.window_meta.active_window", return_value=fake_meta):
+        result = scheduler_mod._build_capture(cfg, _FakeProvider(), trigger=None)
+    assert result is None
+
+
+def test_excluded_bundle_id_skips_capture(ac_root: Path) -> None:
+    cfg = _exclusion_cfg(excluded_bundle_ids=["com.apple.keychainaccess"])
+    fake_meta = window_meta.WindowMeta(
+        app_name="Keychain Access", title="Passwords",
+        bundle_id="com.apple.keychainaccess",
+    )
+    with patch("openchronicle.capture.scheduler.window_meta.active_window", return_value=fake_meta):
+        result = scheduler_mod._build_capture(cfg, _FakeProvider(), trigger=None)
+    assert result is None
+
+
+def test_excluded_title_pattern_skips_capture(ac_root: Path) -> None:
+    cfg = _exclusion_cfg(excluded_window_title_patterns=["Incognito", "Private Browsing"])
+    fake_meta = window_meta.WindowMeta(
+        app_name="Google Chrome",
+        title="GitHub - Google Chrome - Incognito",
+        bundle_id="com.google.chrome",
+    )
+    with patch("openchronicle.capture.scheduler.window_meta.active_window", return_value=fake_meta):
+        result = scheduler_mod._build_capture(cfg, _FakeProvider(), trigger=None)
+    assert result is None
+
+
+def test_non_excluded_window_proceeds(ac_root: Path) -> None:
+    cfg = _exclusion_cfg(
+        excluded_app_names=["Signal"],
+        excluded_window_title_patterns=["Incognito"],
+    )
+    fake_meta = window_meta.WindowMeta(app_name="Cursor", title="main.py", bundle_id="com.todesktop")
+    with patch("openchronicle.capture.scheduler.window_meta.active_window", return_value=fake_meta):
+        result = scheduler_mod._build_capture(cfg, _FakeProvider(), trigger=None)
+    assert result is not None
+    assert result["window_meta"]["app_name"] == "Cursor"
+
+
+def test_exclusion_is_case_insensitive(ac_root: Path) -> None:
+    cfg = _exclusion_cfg(excluded_app_names=["signal"])
+    fake_meta = window_meta.WindowMeta(app_name="Signal", title="Chat", bundle_id="org.signal.desktop")
+    with patch("openchronicle.capture.scheduler.window_meta.active_window", return_value=fake_meta):
+        result = scheduler_mod._build_capture(cfg, _FakeProvider(), trigger=None)
+    assert result is None
+
+
+def test_exclusion_with_empty_title_does_not_match_pattern(ac_root: Path) -> None:
+    cfg = _exclusion_cfg(excluded_window_title_patterns=["Incognito"])
+    fake_meta = window_meta.WindowMeta(app_name="Chrome", title="", bundle_id="com.google.chrome")
+    with patch("openchronicle.capture.scheduler.window_meta.active_window", return_value=fake_meta):
+        result = scheduler_mod._build_capture(cfg, _FakeProvider(), trigger=None)
+    assert result is not None
+
+
+def test_exclusion_empty_pattern_does_not_match_all(ac_root: Path) -> None:
+    """An empty string in excluded_window_title_patterns must not match every window."""
+    cfg = _exclusion_cfg(excluded_window_title_patterns=[""])
+    fake_meta = window_meta.WindowMeta(app_name="Cursor", title="main.py", bundle_id="com.todesktop")
+    with patch("openchronicle.capture.scheduler.window_meta.active_window", return_value=fake_meta):
+        result = scheduler_mod._build_capture(cfg, _FakeProvider(), trigger=None)
+    assert result is not None

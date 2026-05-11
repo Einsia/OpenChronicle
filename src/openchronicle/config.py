@@ -47,6 +47,12 @@ class CaptureConfig:
     screenshot_jpeg_quality: int = 80
     ax_depth: int = 100
     ax_timeout_seconds: int = 3
+    # Privacy exclusions — matching windows are skipped entirely (no AX, no
+    # screenshot, no JSON, no FTS row).  Title patterns use case-insensitive
+    # substring match; app names and bundle IDs use case-insensitive exact match.
+    excluded_window_title_patterns: list[str] = field(default_factory=list)
+    excluded_app_names: list[str] = field(default_factory=list)
+    excluded_bundle_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -242,6 +248,9 @@ screenshot_max_width = 1920
 screenshot_jpeg_quality = 80
 ax_depth = 100                # Electron apps (Claude Desktop, VS Code, Slack) have deep DOM; 8 only reaches the chrome
 ax_timeout_seconds = 3
+# excluded_window_title_patterns = ["Incognito", "Private Browsing", "InPrivate", "1Password"]
+# excluded_app_names             = ["Signal"]
+# excluded_bundle_ids            = ["com.apple.keychainaccess"]
 
 [timeline]
 window_minutes = 1             # length of each aggregator block (verbatim-preserving normalizer)

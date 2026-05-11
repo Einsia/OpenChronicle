@@ -109,6 +109,25 @@ Tuning notes:
 - **`screenshot_retention_hours`.** After this many hours the screenshot field is stripped (rest of the JSON stays). Screenshots aren't used by timeline / reducer / classifier today — setting this ≪ `buffer_retention_hours` is what makes long retention cheap. `0` or very large values keep screenshots for the full window.
 - **`buffer_max_mb`.** Hard ceiling in MB. When exceeded, the cleanup pass evicts oldest absorbed files until under. Set to `0` to disable (pure time-based retention).
 
+### Privacy exclusions
+
+```toml
+[capture]
+excluded_window_title_patterns = ["Incognito", "Private Browsing", "InPrivate", "1Password"]
+excluded_app_names             = ["Signal"]
+excluded_bundle_ids            = ["com.apple.keychainaccess"]
+```
+
+Matching windows are skipped entirely — no AX query, no screenshot, no JSON written, no FTS row indexed. All three lists default to empty (no exclusions).
+
+| Field | Match semantics |
+|---|---|
+| `excluded_window_title_patterns` | Case-insensitive **substring** match against the window title. Empty strings are ignored. |
+| `excluded_app_names` | Case-insensitive **exact** match against the app name (e.g. `"Signal"` matches `Signal` but not `Signal Beta`). |
+| `excluded_bundle_ids` | Case-insensitive **exact** match against the macOS bundle identifier. |
+
+When a window is excluded, only the app name and bundle ID are logged (not the window title) to preserve the privacy intent.
+
 ## `[timeline]`
 
 ```toml

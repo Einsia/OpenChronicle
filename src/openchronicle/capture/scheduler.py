@@ -33,6 +33,23 @@ def _safe_filename(ts: str) -> str:
     return ts.replace(":", "-").replace("+", "p")
 
 
+def _is_excluded(cfg: CaptureConfig, meta: window_meta.WindowMeta) -> bool:
+    """Return True if the active window matches any exclusion rule."""
+    if cfg.excluded_app_names and meta.app_name.lower() in (
+        n.lower() for n in cfg.excluded_app_names
+    ):
+        return True
+    if cfg.excluded_bundle_ids and meta.bundle_id.lower() in (
+        b.lower() for b in cfg.excluded_bundle_ids
+    ):
+        return True
+    if cfg.excluded_window_title_patterns and meta.title:
+        title_lower = meta.title.lower()
+        if any(p and p.lower() in title_lower for p in cfg.excluded_window_title_patterns):
+            return True
+    return False
+
+
 def _build_capture(
     cfg: CaptureConfig,
     provider: ax_capture.AXProvider,
@@ -45,6 +62,15 @@ def _build_capture(
         logger.info("capture skipped (paused)")
         return None
 
+    meta = window_meta.active_window()
+
+    if _is_excluded(cfg, meta):
+        logger.info(
+            "capture skipped (excluded): app=%r bundle=%r",
+            meta.app_name, meta.bundle_id,
+        )
+        return None
+
     ts = _now_iso()
     out: dict[str, Any] = {
         "timestamp": ts,
@@ -52,7 +78,6 @@ def _build_capture(
         "trigger": trigger or {"event_type": "heartbeat"},
     }
 
-    meta = window_meta.active_window()
     out["window_meta"] = {
         "app_name": meta.app_name,
         "title": meta.title,

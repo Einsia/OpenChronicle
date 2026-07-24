@@ -155,11 +155,20 @@ class UnavailableAXProvider:
 class MacAXHelperProvider:
     """Subprocess wrapper around the vendored mac-ax-helper Swift binary."""
 
-    def __init__(self, *, helper_path: Path, depth: int, timeout: int, raw: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        helper_path: Path,
+        depth: int,
+        timeout: int,
+        raw: bool = False,
+        manual_accessibility_bundles: list[str] | None = None,
+    ) -> None:
         self._helper_path = str(helper_path)
         self._depth = depth
         self._timeout = timeout
         self._raw = raw
+        self._manual_accessibility_bundles = manual_accessibility_bundles or []
 
     @property
     def available(self) -> bool:
@@ -194,14 +203,14 @@ class MacAXHelperProvider:
             args.append("--focused-window-only")
         if self._raw:
             args.append("--raw")
+        for bundle in self._manual_accessibility_bundles:
+            args.extend(["--manual-accessibility-bundle", bundle])
         if self._depth > 0:
             args.extend(["--depth", str(self._depth)])
         args.extend(["--timeout", str(self._timeout)])
 
         try:
-            proc = subprocess.run(
-                args, capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT
-            )
+            proc = subprocess.run(args, capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT)
         except subprocess.TimeoutExpired:
             logger.warning("mac-ax-helper timed out after %ds", _SUBPROCESS_TIMEOUT)
             return None
@@ -229,15 +238,35 @@ class MacAXHelperProvider:
 
         data = _strip_frame_fields(data)
         mode = "all-visible" if all_visible else "frontmost"
+        manual_accessibility = [
+            {
+                "bundle_id": app.get("bundle_id", ""),
+                **app["manual_accessibility"],
+            }
+            for app in data.get("apps", [])
+            if isinstance(app.get("manual_accessibility"), dict)
+        ]
         return AXCaptureResult(
             raw_json=data,
             timestamp=data.get("timestamp", ""),
             apps=data.get("apps", []),
-            metadata={"mode": mode, "depth": self._depth, "platform": "macos", "raw": self._raw},
+            metadata={
+                "mode": mode,
+                "depth": self._depth,
+                "platform": "macos",
+                "raw": self._raw,
+                "manual_accessibility": manual_accessibility,
+            },
         )
 
 
-def create_provider(*, depth: int = 8, timeout: int = 3, raw: bool = False) -> AXProvider:
+def create_provider(
+    *,
+    depth: int = 8,
+    timeout: int = 3,
+    raw: bool = False,
+    manual_accessibility_bundles: list[str] | None = None,
+) -> AXProvider:
     if platform.system() != "Darwin":
         return UnavailableAXProvider(f"unsupported platform: {platform.system()}")
     helper = _resolve_helper_path()
@@ -246,4 +275,10 @@ def create_provider(*, depth: int = 8, timeout: int = 3, raw: bool = False) -> A
             "mac-ax-helper not found. Build it: bash resources/build-mac-ax-helper.sh"
         )
     logger.info("AX capture initialized: %s", helper)
-    return MacAXHelperProvider(helper_path=helper, depth=depth, timeout=timeout, raw=raw)
+    return MacAXHelperProvider(
+        helper_path=helper,
+        depth=depth,
+        timeout=timeout,
+        raw=raw,
+        manual_accessibility_bundles=manual_accessibility_bundles,
+    )

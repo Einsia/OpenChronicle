@@ -39,6 +39,7 @@ _IMMEDIATE_EVENTS = {
 }
 _DEBOUNCED_EVENTS = {"AXValueChanged"}
 _SKIP_EVENTS = {"AXTitleChanged"}
+_SAFE_ELEMENT_FIELDS = ("role", "subrole", "identifier")
 
 
 class EventDispatcher:
@@ -102,6 +103,22 @@ class EventDispatcher:
             "bundle_id": bundle_id,
             "window_title": window_title,
         }
+        details = raw.get("details")
+        if isinstance(details, dict):
+            safe_details: dict[str, Any] = {}
+            if isinstance(details.get("reason"), str):
+                safe_details["reason"] = details["reason"][:80]
+            if isinstance(details.get("button"), int):
+                safe_details["button"] = details["button"]
+            element = details.get("element")
+            if isinstance(element, dict):
+                safe_element = {
+                    key: str(element[key])[:200] for key in _SAFE_ELEMENT_FIELDS if element.get(key)
+                }
+                if safe_element:
+                    safe_details["element"] = safe_element
+            if safe_details:
+                trigger["details"] = safe_details
 
         if event_type in _IMMEDIATE_EVENTS:
             self._cancel_debounce()
@@ -111,9 +128,7 @@ class EventDispatcher:
 
     def _prune_event_times(self, now: float) -> None:
         cutoff = now - self._dedup_interval
-        self._last_event_time = {
-            k: t for k, t in self._last_event_time.items() if t >= cutoff
-        }
+        self._last_event_time = {k: t for k, t in self._last_event_time.items() if t >= cutoff}
 
     def _schedule_debounce(self, trigger: dict[str, Any]) -> None:
         with self._lock:
@@ -164,15 +179,14 @@ class EventDispatcher:
             ):
                 logger.debug(
                     "capture skipped (same-window dedup <%.1fs): %s",
-                    self._same_window_dedup, trigger["window_title"][:40],
+                    self._same_window_dedup,
+                    trigger["window_title"][:40],
                 )
                 return
 
             gap = now - self._last_capture_monotonic
             if gap < self._min_capture_gap and not is_focus_change:
-                logger.debug(
-                    "capture skipped (rate limit %.1fs): %s", gap, event_type
-                )
+                logger.debug("capture skipped (rate limit %.1fs): %s", gap, event_type)
                 return
 
             self._last_capture_key = key

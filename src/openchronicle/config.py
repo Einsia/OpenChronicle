@@ -28,7 +28,9 @@ class CaptureConfig:
     debounce_seconds: float = 3.0  # for AXValueChanged bursts
     min_capture_gap_seconds: float = 2.0  # between consecutive captures
     dedup_interval_seconds: float = 1.0  # per-event-type dedup window
-    same_window_dedup_seconds: float = 5.0  # skip repeat non-focus capture in same window within this window
+    same_window_dedup_seconds: float = (
+        5.0  # skip repeat non-focus capture in same window within this window
+    )
     # Legacy timer knob (kept for back-compat; also treated as a floor on heartbeat)
     interval_minutes: int = 10
     # Tiered buffer retention:
@@ -47,6 +49,12 @@ class CaptureConfig:
     screenshot_jpeg_quality: int = 80
     ax_depth: int = 100
     ax_timeout_seconds: int = 3
+    enable_electron_accessibility: bool = True
+    electron_accessibility_bundles: list[str] = field(
+        default_factory=lambda: [
+            "com.microsoft.VSCode",
+        ]
+    )
 
 
 @dataclass
@@ -122,8 +130,10 @@ class SearchConfig:
 
 @dataclass
 class MCPConfig:
-    auto_start: bool = True               # run an in-daemon MCP server
-    transport: str = "streamable-http"    # "streamable-http" | "sse" (deprecated 2026-04-01) | "stdio"
+    auto_start: bool = True  # run an in-daemon MCP server
+    transport: str = (
+        "streamable-http"  # "streamable-http" | "sse" (deprecated 2026-04-01) | "stdio"
+    )
     host: str = "127.0.0.1"
     port: int = 8742
 
@@ -161,7 +171,9 @@ def _as_dict(section: Any) -> dict:
 def _build_models(raw: dict) -> dict[str, ModelConfig]:
     # Build default first so stage sections can inherit only its explicitly-set values.
     default_data = _as_dict(raw.get("default", {}))
-    default_allowed = {k: v for k, v in default_data.items() if k in ModelConfig.__dataclass_fields__}
+    default_allowed = {
+        k: v for k, v in default_data.items() if k in ModelConfig.__dataclass_fields__
+    }
     default = ModelConfig(**default_allowed)
     models = {"default": default}
     for name, section in raw.items():
@@ -242,6 +254,8 @@ screenshot_max_width = 1920
 screenshot_jpeg_quality = 80
 ax_depth = 100                # Electron apps (Claude Desktop, VS Code, Slack) have deep DOM; 8 only reaches the chrome
 ax_timeout_seconds = 3
+enable_electron_accessibility = true
+electron_accessibility_bundles = ["com.microsoft.VSCode"]
 
 [timeline]
 window_minutes = 1             # length of each aggregator block (verbatim-preserving normalizer)

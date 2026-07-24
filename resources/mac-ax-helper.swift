@@ -32,6 +32,7 @@ struct Config {
     var maxDepth = 100   // 0 = unlimited
     var timeout: TimeInterval = 3
     var maxValueLength = 1000
+    var manualAccessibilityBundles: [String] = []
 }
 
 // MARK: - Filtered AX Node
@@ -372,12 +373,43 @@ func processApp(pid: pid_t, name: String, bundleID: String?, isFrontmost: Bool, 
 {
     let appRef = AXUIElementCreateApplication(pid)
 
+    var manualAccessibility: [String: Any]? = nil
+    if let bundle = bundleID,
+       config.manualAccessibilityBundles.contains(where: {
+           $0.caseInsensitiveCompare(bundle) == .orderedSame
+       })
+    {
+        // Electron lazily exposes its Chromium accessibility tree. Electron's
+        // documented third-party macOS integration enables it by setting this
+        // application-level AX attribute before traversing renderer content.
+        let error = AXUIElementSetAttributeValue(
+            appRef,
+            "AXManualAccessibility" as CFString,
+            kCFBooleanTrue
+        )
+        manualAccessibility = [
+            "requested": true,
+            "succeeded": error == .success,
+            "error_code": error.rawValue,
+        ]
+    }
+
+    // Query the actual focused UI element directly. This must not be inferred
+    // later by picking the first text-like node in the filtered tree: many apps
+    // expose several editors/search fields at once, and filtering may collapse
+    // their container hierarchy.
+    var focusedUIElementRef: CFTypeRef?
+    AXUIElementCopyAttributeValue(
+        appRef, kAXFocusedUIElementAttribute as CFString, &focusedUIElementRef
+    )
+    let focusedUIElement = focusedUIElementRef as! AXUIElement?
+
     // Identify the focused window so we can mark it in the output.
     var focusedWindowRef: CFTypeRef?
     AXUIElementCopyAttributeValue(
         appRef, kAXFocusedWindowAttribute as CFString, &focusedWindowRef
     )
-    let focusedElement = focusedWindowRef as! AXUIElement?
+    let focusedWindow = focusedWindowRef as! AXUIElement?
 
     // Get all children (AXChildren includes windows across all Spaces,
     // unlike kAXWindowsAttribute which only returns the current Space).
@@ -402,7 +434,7 @@ func processApp(pid: pid_t, name: String, bundleID: String?, isFrontmost: Bool, 
             let role = axString(child, kAXRoleAttribute as String)
             guard role == "AXWindow" else { continue }
 
-            let isFocusedWindow = focusedElement != nil && CFEqual(child, focusedElement!)
+            let isFocusedWindow = focusedWindow != nil && CFEqual(child, focusedWindow!)
 
             // If --focused-window-only, skip non-focused windows
             if config.focusedWindowOnly && !isFocusedWindow {
@@ -440,6 +472,18 @@ func processApp(pid: pid_t, name: String, bundleID: String?, isFrontmost: Bool, 
         "is_frontmost": isFrontmost,
     ]
     if let bid = bundleID { appDict["bundle_id"] = bid }
+    if let status = manualAccessibility {
+        appDict["manual_accessibility"] = status
+    }
+    if let focused = focusedUIElement,
+       let node = traverseElement(focused, depth: 1, config: config),
+       var dict = node.toDict()
+    {
+        // The value is already redacted by traverseElement for secure fields.
+        // Marking the direct result makes the Python fallback unambiguous.
+        dict["focused"] = true
+        appDict["focused_element"] = dict
+    }
     appDict["windows"] = windowDicts
     return appDict
 }
@@ -474,6 +518,11 @@ func parseArgs() -> Config {
             config.focusedWindowOnly = true
         case "--raw":
             config.raw = true
+        case "--manual-accessibility-bundle":
+            if let next = args.first {
+                config.manualAccessibilityBundles.append(next)
+                args = args.dropFirst()
+            }
         case "--help", "-h":
             fputs(
                 """
@@ -484,6 +533,8 @@ func parseArgs() -> Config {
                   --depth N           Max traversal depth (default: 8)
                   --timeout SECS      Per-app timeout in seconds (default: 3)
                   --raw               Preserve the unfiltered AX tree for debugging/parser work
+                  --manual-accessibility-bundle ID
+                                      Enable Electron AX renderer for this bundle (repeatable)
                 \n
                 """, stderr)
             exit(0)

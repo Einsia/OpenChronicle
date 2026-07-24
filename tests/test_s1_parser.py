@@ -22,6 +22,12 @@ def test_enrich_picks_frontmost_app() -> None:
                 "name": "Cursor",
                 "bundle_id": "com.todesktop.230313mzl4w4u92",
                 "is_frontmost": True,
+                "focused_element": {
+                    "role": "AXTextArea",
+                    "title": "editor",
+                    "value": "def enrich(capture):\n    ...",
+                    "focused": True,
+                },
                 "windows": [
                     {
                         "title": "s1_parser.py",
@@ -54,6 +60,12 @@ def test_enrich_extracts_browser_url() -> None:
                 "name": "Chrome",
                 "bundle_id": "com.google.Chrome",
                 "is_frontmost": True,
+                "focused_element": {
+                    "role": "AXTextField",
+                    "title": "Address and search bar",
+                    "value": "https://www.anthropic.com/news",
+                    "focused": True,
+                },
                 "windows": [
                     {
                         "title": "Anthropic",
@@ -89,6 +101,7 @@ def test_enrich_prefixes_bare_url() -> None:
                         "elements": [
                             {
                                 "role": "AXTextField",
+                                "title": "Address and search bar",
                                 "value": "anthropic.com",
                             }
                         ],
@@ -99,6 +112,176 @@ def test_enrich_prefixes_bare_url() -> None:
     }
     s1_parser.enrich(capture)
     assert capture["url"] == "https://anthropic.com"
+
+
+def test_enrich_recurses_for_explicitly_focused_fallback() -> None:
+    capture = {
+        "ax_tree": _ax_tree(
+            {
+                "name": "Chrome",
+                "bundle_id": "com.google.Chrome",
+                "is_frontmost": True,
+                "windows": [
+                    {
+                        "title": "Nested",
+                        "focused": True,
+                        "elements": [
+                            {
+                                "role": "AXGroup",
+                                "children": [
+                                    {
+                                        "role": "AXTextField",
+                                        "value": "query",
+                                        "focused": True,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    }
+    s1_parser.enrich(capture)
+    assert capture["focused_element"]["role"] == "AXTextField"
+    assert capture["focused_element"]["value"] == "query"
+
+
+def test_enrich_does_not_guess_first_text_node_as_focus() -> None:
+    capture = {
+        "ax_tree": _ax_tree(
+            {
+                "name": "TextEdit",
+                "bundle_id": "com.apple.TextEdit",
+                "is_frontmost": True,
+                "windows": [
+                    {
+                        "title": "Document",
+                        "focused": True,
+                        "elements": [
+                            {"role": "AXStaticText", "value": "heading"},
+                            {"role": "AXTextArea", "value": "body"},
+                        ],
+                    }
+                ],
+            }
+        )
+    }
+    s1_parser.enrich(capture)
+    assert capture["focused_element"]["role"] == ""
+
+
+def test_enrich_extracts_nested_combobox_address_bar() -> None:
+    capture = {
+        "ax_tree": _ax_tree(
+            {
+                "name": "Chrome",
+                "bundle_id": "com.google.Chrome",
+                "is_frontmost": True,
+                "windows": [
+                    {
+                        "title": "Example",
+                        "focused": True,
+                        "elements": [
+                            {
+                                "role": "AXToolbar",
+                                "children": [
+                                    {
+                                        "role": "AXGroup",
+                                        "children": [
+                                            {
+                                                "role": "AXComboBox",
+                                                "identifier": "location_bar",
+                                                "value": "HTTPS://Example.COM/Path",
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    }
+    s1_parser.enrich(capture)
+    assert capture["url"] == "https://example.com/Path"
+    assert capture["url_source"] == "ax_address_bar"
+
+
+def test_enrich_rejects_ambiguous_page_url_fields() -> None:
+    capture = {
+        "ax_tree": _ax_tree(
+            {
+                "name": "Chrome",
+                "bundle_id": "com.google.Chrome",
+                "is_frontmost": True,
+                "windows": [
+                    {
+                        "title": "Form",
+                        "focused": True,
+                        "elements": [
+                            {
+                                "role": "AXWebArea",
+                                "children": [
+                                    {"role": "AXTextField", "value": "https://one.example"},
+                                    {"role": "AXTextField", "value": "https://two.example"},
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    }
+    s1_parser.enrich(capture)
+    assert capture["url"] is None
+    assert capture["url_source"] == "unavailable"
+
+
+def test_normalize_url_handles_supported_special_cases() -> None:
+    assert s1_parser._normalize_url(" localhost:8000/path ") == "https://localhost:8000/path"
+    assert s1_parser._normalize_url("http://127.0.0.1:8742/MCP") == ("http://127.0.0.1:8742/MCP")
+    assert s1_parser._normalize_url("http://[::1]:8080/Path") == ("http://[::1]:8080/Path")
+    assert s1_parser._normalize_url("chrome://settings/privacy") == ("chrome://settings/privacy")
+    assert s1_parser._normalize_url("file:///Users/example/Test.txt") == (
+        "file:///Users/example/Test.txt"
+    )
+    assert s1_parser._normalize_url("https://user:secret@Example.COM/Path") == (
+        "https://example.com/Path"
+    )
+
+
+def test_enrich_does_not_treat_page_search_box_as_address_bar() -> None:
+    capture = {
+        "ax_tree": _ax_tree(
+            {
+                "name": "Chrome",
+                "bundle_id": "com.google.Chrome",
+                "is_frontmost": True,
+                "windows": [
+                    {
+                        "title": "Search form",
+                        "focused": True,
+                        "elements": [
+                            {
+                                "role": "AXWebArea",
+                                "children": [
+                                    {
+                                        "role": "AXTextField",
+                                        "title": "Search bar",
+                                        "value": "https://not-the-page.example",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    }
+    s1_parser.enrich(capture)
+    assert capture["url"] is None
 
 
 def test_enrich_non_browser_has_no_url() -> None:
@@ -163,9 +346,7 @@ def test_enrich_no_focused_window_returns_empty_element() -> None:
                     {
                         "title": "unfocused",
                         "focused": False,
-                        "elements": [
-                            {"role": "AXTextField", "value": "something"}
-                        ],
+                        "elements": [{"role": "AXTextField", "value": "something"}],
                     }
                 ],
             }

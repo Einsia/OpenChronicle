@@ -24,6 +24,14 @@ from .watcher import AXWatcherProcess
 
 logger = get("openchronicle.capture")
 
+_AX_RETRY_EVENTS = {
+    "AXApplicationActivated",
+    "AXFocusedWindowChanged",
+    "UserMouseClick",
+    "UserTextInput",
+}
+_AX_RETRY_DELAYS = (0.15, 0.35)
+
 
 def _now_iso() -> str:
     return datetime.now(UTC).astimezone().replace(microsecond=0).isoformat()
@@ -31,6 +39,117 @@ def _now_iso() -> str:
 
 def _safe_filename(ts: str) -> str:
     return ts.replace(":", "-").replace("+", "p")
+
+
+def _normalize_title(value: Any) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _snapshot_window_meta(ax_tree: dict[str, Any]) -> dict[str, str]:
+    apps = ax_tree.get("apps") or []
+    app = next((item for item in apps if item.get("is_frontmost")), None)
+    if app is None:
+        app = apps[0] if apps else None
+    if not isinstance(app, dict):
+        return {"app_name": "", "title": "", "bundle_id": ""}
+
+    windows = app.get("windows") or []
+    window = next((item for item in windows if item.get("focused")), None)
+    if window is None:
+        window = windows[0] if windows else None
+    return {
+        "app_name": _normalize_title(app.get("name")),
+        "title": _normalize_title(window.get("title")) if isinstance(window, dict) else "",
+        "bundle_id": str(app.get("bundle_id") or ""),
+    }
+
+
+def _frontmost_snapshot_app(ax_tree: dict[str, Any]) -> dict[str, Any] | None:
+    apps = ax_tree.get("apps") or []
+    app = next((item for item in apps if item.get("is_frontmost")), None)
+    if app is None:
+        app = apps[0] if apps else None
+    return app if isinstance(app, dict) else None
+
+
+def _snapshot_quality(ax_tree: dict[str, Any]) -> int:
+    """Score fields that indicate the focused app's AX tree is ready."""
+    app = _frontmost_snapshot_app(ax_tree)
+    if app is None:
+        return 0
+
+    score = 1
+    if app.get("focused_element"):
+        score += 100
+    windows = app.get("windows") or []
+    focused_window = next((item for item in windows if item.get("focused")), None)
+    if isinstance(focused_window, dict):
+        score += 10
+        if _normalize_title(focused_window.get("title")):
+            score += 2
+        if focused_window.get("elements"):
+            score += 5
+    return score
+
+
+def _snapshot_needs_retry(ax_tree: dict[str, Any], trigger: dict[str, Any] | None) -> bool:
+    if (trigger or {}).get("event_type") not in _AX_RETRY_EVENTS:
+        return False
+    app = _frontmost_snapshot_app(ax_tree)
+    if app is None or app.get("focused_element"):
+        return False
+    # Browser page content often has no focused AX element at all. If the
+    # focused window already exposes one unambiguous address-bar URL, the
+    # snapshot is useful and complete; retrying only adds 500 ms of latency.
+    url, source = s1_parser._extract_url(app)
+    if url is not None and source == "ax_address_bar":
+        return False
+    return any(window.get("focused") for window in (app.get("windows") or []))
+
+
+def _capture_ax_with_retry(
+    provider: ax_capture.AXProvider,
+    trigger: dict[str, Any] | None,
+) -> tuple[ax_capture.AXCaptureResult | None, int, bool]:
+    """Capture AX, retrying incomplete snapshots without crossing app identity."""
+    result = provider.capture_frontmost(focused_window_only=True)
+    if result is None:
+        return None, 0, True
+
+    best = result
+    best_quality = _snapshot_quality(result.raw_json)
+    initial_bundle = _snapshot_window_meta(result.raw_json)["bundle_id"]
+    retry_count = 0
+    consistent = True
+
+    if not _snapshot_needs_retry(result.raw_json, trigger):
+        return best, retry_count, consistent
+
+    for delay in _AX_RETRY_DELAYS:
+        time.sleep(delay)
+        candidate = provider.capture_frontmost(focused_window_only=True)
+        retry_count += 1
+        if candidate is None:
+            continue
+
+        candidate_bundle = _snapshot_window_meta(candidate.raw_json)["bundle_id"]
+        if initial_bundle and candidate_bundle != initial_bundle:
+            consistent = False
+            logger.debug(
+                "AX retry discarded after app changed: %r -> %r",
+                initial_bundle,
+                candidate_bundle,
+            )
+            break
+
+        quality = _snapshot_quality(candidate.raw_json)
+        if quality > best_quality:
+            best = candidate
+            best_quality = quality
+        if not _snapshot_needs_retry(candidate.raw_json, trigger):
+            break
+
+    return best, retry_count, consistent
 
 
 def _build_capture(
@@ -52,20 +171,51 @@ def _build_capture(
         "trigger": trigger or {"event_type": "heartbeat"},
     }
 
-    meta = window_meta.active_window()
-    out["window_meta"] = {
-        "app_name": meta.app_name,
-        "title": meta.title,
-        "bundle_id": meta.bundle_id,
-    }
-
     if provider.available:
-        result = provider.capture_frontmost(focused_window_only=True)
+        result, retry_count, ax_consistent = _capture_ax_with_retry(provider, trigger)
         if result is not None:
             out["ax_tree"] = result.raw_json
-            out["ax_metadata"] = result.metadata
+            out["ax_metadata"] = {
+                **result.metadata,
+                "retry_count": retry_count,
+                "app_consistent": ax_consistent,
+            }
     else:
         out["ax_unavailable"] = True
+
+    snapshot_meta = _snapshot_window_meta(out.get("ax_tree") or {})
+    bundle_id = snapshot_meta["bundle_id"]
+    app_name = snapshot_meta["app_name"]
+    title = snapshot_meta["title"]
+    title_source = "ax_snapshot" if title else "unavailable"
+
+    trigger_data = trigger or {}
+    trigger_bundle = str(trigger_data.get("bundle_id") or "")
+    trigger_title = _normalize_title(trigger_data.get("window_title"))
+    if not title and trigger_title and trigger_bundle and trigger_bundle == bundle_id:
+        title = trigger_title
+        title_source = "trigger"
+
+    # System Events is a last-resort metadata source. Only combine it with an
+    # AX snapshot when both identify the same app.
+    if not app_name or not bundle_id or not title:
+        fallback = window_meta.active_window()
+        if not bundle_id:
+            bundle_id = fallback.bundle_id
+        if not app_name and (not bundle_id or fallback.bundle_id == bundle_id):
+            app_name = _normalize_title(fallback.app_name)
+        if not title and fallback.bundle_id == bundle_id:
+            title = _normalize_title(fallback.title)
+            if title:
+                title_source = "system_events"
+
+    out["window_meta"] = {
+        "app_name": app_name,
+        "title": title,
+        "bundle_id": bundle_id,
+        "title_source": title_source,
+        "sampled_at": ts,
+    }
 
     if cfg.include_screenshot:
         shot = screenshot.grab(
@@ -215,7 +365,9 @@ class _CaptureRunner:
         if self._worker is not None and self._worker.is_alive():
             return
         self._worker = threading.Thread(
-            target=self._worker_loop, name="capture-worker", daemon=True,
+            target=self._worker_loop,
+            name="capture-worker",
+            daemon=True,
         )
         self._worker.start()
 
@@ -293,11 +445,15 @@ async def run_forever(
     timer isn't refreshed by a screen that isn't changing (e.g. the lock
     screen overnight).
     """
-    provider = ax_capture.create_provider(depth=cfg.ax_depth, timeout=cfg.ax_timeout_seconds)
+    provider = ax_capture.create_provider(
+        depth=cfg.ax_depth,
+        timeout=cfg.ax_timeout_seconds,
+        manual_accessibility_bundles=(
+            cfg.electron_accessibility_bundles if cfg.enable_electron_accessibility else []
+        ),
+    )
     if not provider.available:
-        logger.warning(
-            "AX capture unavailable: %s", getattr(provider, "reason", "unknown reason")
-        )
+        logger.warning("AX capture unavailable: %s", getattr(provider, "reason", "unknown reason"))
 
     runner = _CaptureRunner(cfg, provider, pre_capture_hook=pre_capture_hook)
     runner.start_worker()
@@ -323,9 +479,7 @@ async def run_forever(
             watcher.start()
             logger.info("event-driven capture started")
         else:
-            logger.warning(
-                "AX watcher unavailable — falling back to heartbeat-only captures"
-            )
+            logger.warning("AX watcher unavailable — falling back to heartbeat-only captures")
 
     # One capture immediately so the user sees something in the buffer right away.
     runner.run_threaded(None)
@@ -335,7 +489,8 @@ async def run_forever(
             heartbeat_interval = max(60.0, cfg.heartbeat_minutes * 60.0)
             logger.info(
                 "heartbeat capture every %.0fs (event_driven=%s)",
-                heartbeat_interval, cfg.event_driven,
+                heartbeat_interval,
+                cfg.event_driven,
             )
             while True:
                 await asyncio.sleep(heartbeat_interval)
@@ -462,9 +617,7 @@ def _delete_captures_from_fts(stems: list[str]) -> None:
             for stem in stems:
                 fts_store.delete_capture(conn, stem)
     except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "captures FTS delete failed for %d stems: %s", len(stems), exc
-        )
+        logger.warning("captures FTS delete failed for %d stems: %s", len(stems), exc)
 
 
 def _strip_screenshot_inplace(path: Path) -> bool:

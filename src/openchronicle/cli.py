@@ -880,7 +880,13 @@ def capture_once() -> None:
     from .capture import ax_capture, scheduler
 
     provider = ax_capture.create_provider(
-        depth=cfg.capture.ax_depth, timeout=cfg.capture.ax_timeout_seconds
+        depth=cfg.capture.ax_depth,
+        timeout=cfg.capture.ax_timeout_seconds,
+        manual_accessibility_bundles=(
+            cfg.capture.electron_accessibility_bundles
+            if cfg.capture.enable_electron_accessibility
+            else []
+        ),
     )
     path = scheduler.capture_once(cfg.capture, provider)
     if path:

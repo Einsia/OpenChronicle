@@ -6,6 +6,10 @@ from openchronicle import config
 def test_defaults_when_no_file(tmp_path: Path) -> None:
     cfg = config.load(tmp_path / "missing.toml")
     assert cfg.capture.interval_minutes == 10
+    assert cfg.capture.enable_electron_accessibility is True
+    assert cfg.capture.electron_accessibility_bundles == [
+        "com.microsoft.VSCode",
+    ]
     assert cfg.session.gap_minutes == 5
     assert cfg.reducer.enabled is True
     default = cfg.model_for("reducer")
@@ -49,3 +53,17 @@ def test_api_key_precedence(tmp_path: Path, monkeypatch) -> None:
     assert config.resolve_api_key(cfg) == "direct"
     cfg2 = config.ModelConfig(api_key="", api_key_env="ENV_KEY")
     assert config.resolve_api_key(cfg2) == "from-env"
+
+
+def test_electron_accessibility_config_override(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        """
+[capture]
+enable_electron_accessibility = false
+electron_accessibility_bundles = ["com.example.CustomElectron"]
+"""
+    )
+    cfg = config.load(path)
+    assert cfg.capture.enable_electron_accessibility is False
+    assert cfg.capture.electron_accessibility_bundles == ["com.example.CustomElectron"]

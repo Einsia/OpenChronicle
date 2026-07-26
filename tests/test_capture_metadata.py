@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 from openchronicle.capture import scheduler
+from openchronicle.capture.signal_store import SignalStore
 from openchronicle.config import CaptureConfig
 
 
@@ -328,3 +330,102 @@ def test_build_capture_does_not_retry_complete_browser_page(monkeypatch, ac_root
     assert out["url"] == "https://example.com/?oc_case=A01"
     assert out["ax_metadata"]["retry_count"] == 0
     assert out["ax_metadata"]["app_consistent"] is True
+
+
+def test_enter_reuses_identical_snapshot_without_losing_signal(monkeypatch, ac_root) -> None:
+    monkeypatch.setattr(scheduler, "_AX_RETRY_DELAYS", ())
+    monkeypatch.setattr(scheduler.screenshot, "grab", lambda **_: None)
+    provider = _Provider(
+        {
+            "apps": [
+                {
+                    "name": "TextEdit",
+                    "bundle_id": "com.apple.TextEdit",
+                    "is_frontmost": True,
+                    "focused_element": {"role": "AXTextArea", "value": "same"},
+                    "windows": [
+                        {
+                            "title": "Untitled",
+                            "focused": True,
+                            "elements": [{"role": "AXTextArea", "value": "same"}],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    store = SignalStore()
+    runner = scheduler._CaptureRunner(
+        CaptureConfig(include_screenshot=False),
+        provider,
+        signal_store=store,
+    )
+    for signal_id in ("enter-1", "enter-2"):
+        store.create_user_enter(
+            {
+                "event_type": "UserEnter",
+                "signal_id": signal_id,
+                "timestamp": "2026-07-25T12:00:00+08:00",
+                "bundle_id": "com.apple.TextEdit",
+                "key_variant": "return",
+            }
+        )
+        runner.run(
+            {
+                "event_type": "UserEnter",
+                "signal_id": signal_id,
+                "bundle_id": "com.apple.TextEdit",
+            }
+        )
+
+    first = json.loads((ac_root / "signal-buffer" / "enter-1.json").read_text())
+    second = json.loads((ac_root / "signal-buffer" / "enter-2.json").read_text())
+    assert first["snapshot_status"] == "captured"
+    assert second["snapshot_status"] == "reused"
+    assert second["snapshot_ref"] == first["snapshot_ref"]
+    assert len(list((ac_root / "capture-buffer").glob("*.json"))) == 1
+
+
+def test_enter_does_not_associate_snapshot_after_app_switch(monkeypatch, ac_root) -> None:
+    monkeypatch.setattr(scheduler, "_AX_RETRY_DELAYS", ())
+    monkeypatch.setattr(scheduler.screenshot, "grab", lambda **_: None)
+    provider = _Provider(
+        {
+            "apps": [
+                {
+                    "name": "Chrome",
+                    "bundle_id": "com.google.Chrome",
+                    "is_frontmost": True,
+                    "windows": [{"title": "New app", "focused": True, "elements": []}],
+                }
+            ]
+        }
+    )
+    store = SignalStore()
+    store.create_user_enter(
+        {
+            "event_type": "UserEnter",
+            "signal_id": "switched",
+            "timestamp": "2026-07-25T12:00:00+08:00",
+            "bundle_id": "com.apple.TextEdit",
+            "key_variant": "return",
+        }
+    )
+    runner = scheduler._CaptureRunner(
+        CaptureConfig(include_screenshot=False),
+        provider,
+        signal_store=store,
+    )
+
+    runner.run(
+        {
+            "event_type": "UserEnter",
+            "signal_id": "switched",
+            "bundle_id": "com.apple.TextEdit",
+        }
+    )
+
+    signal = json.loads((ac_root / "signal-buffer" / "switched.json").read_text())
+    assert signal["snapshot_status"] == "app_changed"
+    assert signal["snapshot_ref"] is None
+    assert list((ac_root / "capture-buffer").glob("*.json")) == []

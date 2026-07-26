@@ -20,6 +20,7 @@ from ..logger import get
 from ..store import fts as fts_store
 from . import ax_capture, s1_parser, screenshot, window_meta
 from .event_dispatcher import EventDispatcher
+from .signal_store import SignalStore
 from .watcher import AXWatcherProcess
 
 logger = get("openchronicle.capture")
@@ -29,12 +30,13 @@ _AX_RETRY_EVENTS = {
     "AXFocusedWindowChanged",
     "UserMouseClick",
     "UserTextInput",
+    "UserEnter",
 }
 _AX_RETRY_DELAYS = (0.15, 0.35)
 
 
 def _now_iso() -> str:
-    return datetime.now(UTC).astimezone().replace(microsecond=0).isoformat()
+    return datetime.now(UTC).astimezone().isoformat(timespec="milliseconds")
 
 
 def _safe_filename(ts: str) -> str:
@@ -350,13 +352,17 @@ class _CaptureRunner:
         cfg: CaptureConfig,
         provider: ax_capture.AXProvider,
         *,
+        signal_store: SignalStore | None = None,
         pre_capture_hook: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self._cfg = cfg
         self._provider = provider
+        self._signal_store = signal_store
         self._pre_capture_hook = pre_capture_hook
         self._lock = threading.Lock()
         self._last_fingerprint: str | None = None
+        self._last_snapshot_ref: str | None = None
+        self._last_snapshot_bundle: str = ""
         self._queue: queue.Queue[Any] = queue.Queue(maxsize=self._MAX_PENDING)
         self._worker: threading.Thread | None = None
 
@@ -392,28 +398,53 @@ class _CaptureRunner:
     def run(self, trigger: dict[str, Any] | None) -> None:
         # Serialize so two near-simultaneous triggers don't double-capture.
         with self._lock:
+            signal_id = str((trigger or {}).get("signal_id") or "")
             try:
                 out = _build_capture(self._cfg, self._provider, trigger)
                 if out is None:
+                    self._update_signal(signal_id, "capture_unavailable")
+                    return
+                meta = out.get("window_meta") or {}
+                snapshot_bundle = str(meta.get("bundle_id") or "")
+                trigger_bundle = str((trigger or {}).get("bundle_id") or "")
+                if signal_id and (
+                    not trigger_bundle
+                    or not snapshot_bundle
+                    or trigger_bundle != snapshot_bundle
+                ):
+                    self._update_signal(signal_id, "app_changed")
                     return
                 fingerprint = _content_fingerprint(out)
                 if fingerprint == self._last_fingerprint:
-                    meta = out.get("window_meta") or {}
                     logger.debug(
                         "capture skipped (content dedup): trigger=%s app=%r title=%r",
                         (trigger or {}).get("event_type"),
                         meta.get("app_name"),
                         (meta.get("title") or "")[:60],
                     )
+                    if (
+                        signal_id
+                        and self._last_snapshot_ref
+                        and snapshot_bundle == self._last_snapshot_bundle
+                    ):
+                        self._update_signal(
+                            signal_id, "reused", snapshot_ref=self._last_snapshot_ref
+                        )
+                    else:
+                        self._update_signal(signal_id, "duplicate_without_ref")
                     return
                 self._last_fingerprint = fingerprint
-                _write_capture(out)
+                path = _write_capture(out)
+                self._last_snapshot_ref = path.name
+                self._last_snapshot_bundle = snapshot_bundle
+                self._update_signal(signal_id, "captured", snapshot_ref=path.name)
                 if self._pre_capture_hook is not None and trigger is not None:
                     try:
                         self._pre_capture_hook(trigger)
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("pre_capture_hook failed: %s", exc)
             except Exception as exc:  # noqa: BLE001
+                self._update_signal(signal_id, "capture_failed")
                 logger.error("capture failed: %s", exc, exc_info=True)
 
     def run_threaded(self, trigger: dict[str, Any] | None) -> None:
@@ -421,10 +452,26 @@ class _CaptureRunner:
         try:
             self._queue.put_nowait(trigger)
         except queue.Full:
+            signal_id = str((trigger or {}).get("signal_id") or "")
+            self._update_signal(signal_id, "queue_full")
             logger.warning(
                 "capture queue full (%d pending); dropping trigger=%s",
                 self._queue.qsize(),
                 (trigger or {}).get("event_type") if trigger else "heartbeat",
+            )
+
+    def _update_signal(
+        self,
+        signal_id: str,
+        status: str,
+        *,
+        snapshot_ref: str | None = None,
+    ) -> None:
+        if signal_id and self._signal_store is not None:
+            self._signal_store.update_snapshot(
+                signal_id,
+                status=status,
+                snapshot_ref=snapshot_ref,
             )
 
 
@@ -455,7 +502,13 @@ async def run_forever(
     if not provider.available:
         logger.warning("AX capture unavailable: %s", getattr(provider, "reason", "unknown reason"))
 
-    runner = _CaptureRunner(cfg, provider, pre_capture_hook=pre_capture_hook)
+    signal_store = SignalStore(excluded_bundle_ids=set(cfg.excluded_signal_bundle_ids))
+    runner = _CaptureRunner(
+        cfg,
+        provider,
+        signal_store=signal_store,
+        pre_capture_hook=pre_capture_hook,
+    )
     runner.start_worker()
     watcher: AXWatcherProcess | None = None
     dispatcher: EventDispatcher | None = None
@@ -470,6 +523,7 @@ async def run_forever(
         if watcher.available:
             dispatcher = EventDispatcher(
                 _on_capture,
+                signal_store=signal_store,
                 debounce_seconds=cfg.debounce_seconds,
                 min_capture_gap_seconds=cfg.min_capture_gap_seconds,
                 dedup_interval_seconds=cfg.dedup_interval_seconds,

@@ -21,6 +21,10 @@ def capture_buffer_dir() -> Path:
     return root() / "capture-buffer"
 
 
+def signal_buffer_dir() -> Path:
+    return root() / "signal-buffer"
+
+
 def logs_dir() -> Path:
     return root() / "logs"
 
@@ -47,5 +51,5 @@ def writer_state() -> Path:
 
 
 def ensure_dirs() -> None:
-    for d in (root(), memory_dir(), capture_buffer_dir(), logs_dir()):
+    for d in (root(), memory_dir(), capture_buffer_dir(), signal_buffer_dir(), logs_dir()):
         d.mkdir(parents=True, exist_ok=True)

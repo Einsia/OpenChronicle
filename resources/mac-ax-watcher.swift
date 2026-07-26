@@ -109,6 +109,18 @@ func describeElement(_ el: AXUIElement) -> [String: Any] {
     ]
 }
 
+/// Privacy-minimized element description for physical interaction signals.
+/// Unlike TextInput/MouseClick payloads, UserEnter never includes title/value.
+func describeSignalTarget(_ el: AXUIElement) -> [String: Any] {
+    return [
+        "role": axRole(el) ?? "",
+        "subrole": axSubrole(el) ?? "",
+        "identifier": truncate(
+            axString(el, kAXIdentifierAttribute as String) ?? "", 200
+        ),
+    ]
+}
+
 /// Resolve the owning app (name + bundle id) for an AX element.
 func appInfoForElement(_ el: AXUIElement) -> (pid: pid_t, name: String, bundleId: String) {
     var pid: pid_t = 0
@@ -174,6 +186,29 @@ let kTextInputDebounceSeconds: TimeInterval = 5.0
 /// uninterruptedly for this long we flush anyway so downstream consumers
 /// see activity rather than waiting indefinitely for a pause.
 let kTextInputMaxContinuousSeconds: TimeInterval = 60.0
+
+/// Classify the two physical Enter keys. Auto-repeat is intentionally
+/// rejected here so every caller shares the same behavior.
+func enterKeyVariant(keyCode: Int64, isRepeat: Bool) -> String? {
+    if isRepeat { return nil }
+    switch keyCode {
+    case 36:
+        return "return"
+    case 76:
+        return "keypad_enter"
+    default:
+        return nil
+    }
+}
+
+func enterModifierNames(_ flags: CGEventFlags) -> [String] {
+    var modifiers: [String] = []
+    if flags.contains(.maskShift) { modifiers.append("shift") }
+    if flags.contains(.maskCommand) { modifiers.append("command") }
+    if flags.contains(.maskControl) { modifiers.append("control") }
+    if flags.contains(.maskAlternate) { modifiers.append("option") }
+    return modifiers
+}
 
 final class InteractionTapper {
     private var eventTap: CFMachPort?
@@ -289,6 +324,63 @@ final class InteractionTapper {
 
     /// Called by the CGEventTap callback on a keyDown event.
     func handleKeyDown(_ event: CGEvent) {
+        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        let isRepeat =
+            event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        let keyVariant = enterKeyVariant(keyCode: keyCode, isRepeat: isRepeat)
+
+        // Enter is a physical interaction signal, including Command/Control
+        // variants, so it must be handled before shortcut filtering.
+        if let variant = keyVariant {
+            let signalID = UUID().uuidString.lowercased()
+            let flags = event.flags
+            let modifiers = enterModifierNames(flags)
+
+            var appInfo: (pid: pid_t, name: String, bundleId: String) = (0, "", "")
+            var target: [String: Any] = [:]
+            var targetStatus = "app_unavailable"
+            if let front = NSWorkspace.shared.frontmostApplication {
+                appInfo = (
+                    front.processIdentifier,
+                    front.localizedName ?? "",
+                    front.bundleIdentifier ?? ""
+                )
+                let appElement = AXUIElementCreateApplication(appInfo.pid)
+                if let element = focusedElement(appElement) {
+                    if isSecureElement(element) {
+                        targetStatus = "secure_input"
+                    } else {
+                        target = describeSignalTarget(element)
+                        targetStatus = "available"
+                    }
+                } else {
+                    targetStatus = "ax_unavailable"
+                }
+            }
+
+            // Preserve event order: any pending text belongs before the Enter.
+            // When no text is pending flushText is intentionally a no-op.
+            flushText(reason: "enter", associationID: signalID)
+
+            writer.write(event: [
+                "event_type": "UserEnter",
+                "signal_id": signalID,
+                "pid": appInfo.pid,
+                "app_name": appInfo.name,
+                "bundle_id": appInfo.bundleId,
+                // A window title may contain contacts, documents, URLs, or
+                // secrets. UserEnter does not need it for app correlation.
+                "window_title": "",
+                "timestamp": nowIsoLocal(),
+                "key_variant": variant,
+                "modifiers": modifiers,
+                "input_target": target,
+                "input_target_status": targetStatus,
+                "semantic_intent": "unknown",
+            ])
+            return
+        }
+
         // ⌘ / ⌃ held = shortcut (⌘S, ⌃C, etc.), not typing. Skip so the
         // debounce timer doesn't get reset by a keybind. ⌥ is allowed
         // through because it's commonly used for alternate characters
@@ -358,7 +450,7 @@ final class InteractionTapper {
 
     /// Emit a pending ``UserTextInput`` event if one is buffered. Safe to
     /// call from any thread; idempotent when there's nothing to flush.
-    func flushText(reason: String) {
+    func flushText(reason: String, associationID: String? = nil) {
         textLock.lock()
         guard typingStartedAt != nil else {
             textLock.unlock()
@@ -396,7 +488,7 @@ final class InteractionTapper {
             }
         }
 
-        writer.write(event: [
+        var textEvent: [String: Any] = [
             "event_type": "UserTextInput",
             "pid": app.pid,
             "app_name": app.name,
@@ -407,7 +499,11 @@ final class InteractionTapper {
                 "reason": reason,
                 "element": elementDict,
             ],
-        ])
+        ]
+        if let signalID = associationID {
+            textEvent["signal_id"] = signalID
+        }
+        writer.write(event: textEvent)
     }
 
     /// Re-enable the tap after the system disables it (e.g. because a
@@ -726,4 +822,31 @@ func main() {
     CFRunLoopRun()
 }
 
-main()
+func runEnterSelfTests() -> Bool {
+    let allFlags = CGEventFlags(
+        rawValue: CGEventFlags.maskShift.rawValue
+            | CGEventFlags.maskCommand.rawValue
+            | CGEventFlags.maskControl.rawValue
+            | CGEventFlags.maskAlternate.rawValue
+    )
+    let checks = [
+        enterKeyVariant(keyCode: 36, isRepeat: false) == "return",
+        enterKeyVariant(keyCode: 76, isRepeat: false) == "keypad_enter",
+        enterKeyVariant(keyCode: 0, isRepeat: false) == nil,
+        enterKeyVariant(keyCode: 36, isRepeat: true) == nil,
+        enterKeyVariant(keyCode: 76, isRepeat: true) == nil,
+        enterModifierNames(allFlags) == ["shift", "command", "control", "option"],
+    ]
+    if checks.allSatisfy({ $0 }) {
+        print("Enter self-tests passed")
+        return true
+    }
+    fputs("Enter self-tests failed\n", stderr)
+    return false
+}
+
+if CommandLine.arguments.contains("--self-test") {
+    exit(runEnterSelfTests() ? 0 : 1)
+} else {
+    main()
+}

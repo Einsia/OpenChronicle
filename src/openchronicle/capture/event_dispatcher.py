@@ -28,6 +28,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ..logger import get
+from .signal_store import SignalStore
 
 logger = get("openchronicle.capture")
 
@@ -54,12 +55,20 @@ class EventDispatcher:
         self,
         capture_fn: Callable[[dict[str, Any]], None],
         *,
+        signal_store: SignalStore | None = None,
+        enter_capture_delay_seconds: float = 0.2,
+        # Sample after the documented 800ms update boundary rather than
+        # exactly on it, avoiding a race with UI work scheduled for T+800ms.
+        enter_followup_delay_seconds: float | None = 1.0,
         debounce_seconds: float = 3.0,
         min_capture_gap_seconds: float = 2.0,
         dedup_interval_seconds: float = 1.0,
         same_window_dedup_seconds: float = 5.0,
     ) -> None:
         self._capture_fn = capture_fn
+        self._signal_store = signal_store
+        self._enter_capture_delay = enter_capture_delay_seconds
+        self._enter_followup_delay = enter_followup_delay_seconds
         self._debounce_seconds = debounce_seconds
         self._min_capture_gap = min_capture_gap_seconds
         self._dedup_interval = dedup_interval_seconds
@@ -67,6 +76,7 @@ class EventDispatcher:
 
         self._lock = threading.Lock()
         self._debounce_timer: threading.Timer | None = None
+        self._enter_timers: set[threading.Timer] = set()
         self._pending_trigger: dict[str, Any] | None = None
 
         # Tuple keys avoid the silent collision a delimited-string key has
@@ -84,6 +94,9 @@ class EventDispatcher:
         """Watcher callback. Classifies the event and (maybe) triggers capture."""
         event_type = raw.get("event_type", "")
         if not event_type or event_type in _SKIP_EVENTS:
+            return
+        if event_type == "UserEnter":
+            self._handle_user_enter(raw)
             return
 
         bundle_id = raw.get("bundle_id", "") or ""
@@ -103,6 +116,9 @@ class EventDispatcher:
             "bundle_id": bundle_id,
             "window_title": window_title,
         }
+        association_id = raw.get("signal_id")
+        if isinstance(association_id, str) and 0 < len(association_id) <= 128:
+            trigger["signal_id"] = association_id
         details = raw.get("details")
         if isinstance(details, dict):
             safe_details: dict[str, Any] = {}
@@ -125,6 +141,55 @@ class EventDispatcher:
             self._maybe_capture(trigger)
         elif event_type in _DEBOUNCED_EVENTS:
             self._schedule_debounce(trigger)
+
+    def _handle_user_enter(self, raw: dict[str, Any]) -> None:
+        """Persist Enter before requesting capture and bypass event dedup."""
+        if self._signal_store is None:
+            logger.warning("UserEnter ignored: signal store unavailable")
+            return
+        result = self._signal_store.create_user_enter(raw)
+        if not result.created:
+            return
+
+        trigger = {
+            "event_type": "UserEnter",
+            "signal_id": result.signal_id,
+            "pid": raw.get("pid", 0),
+            "app_name": str(raw.get("app_name") or "")[:200],
+            "bundle_id": str(raw.get("bundle_id") or "")[:300],
+            # Never pass a watcher window title into logs/capture metadata.
+            "window_title": "",
+        }
+
+        def schedule_request(delay: float, attempt: str) -> None:
+            timer: threading.Timer
+
+            def request_capture() -> None:
+                attempt_trigger = {**trigger, "enter_attempt": attempt}
+                try:
+                    self._capture_fn(attempt_trigger)
+                except Exception as exc:  # noqa: BLE001
+                    self._signal_store.update_snapshot(
+                        result.signal_id, status="capture_request_failed"
+                    )
+                    logger.warning(
+                        "Enter capture request failed: id=%s error=%s",
+                        result.signal_id,
+                        type(exc).__name__,
+                    )
+                finally:
+                    with self._lock:
+                        self._enter_timers.discard(timer)
+
+            timer = threading.Timer(delay, request_capture)
+            timer.daemon = True
+            with self._lock:
+                self._enter_timers.add(timer)
+            timer.start()
+
+        schedule_request(self._enter_capture_delay, "initial")
+        if self._enter_followup_delay is not None:
+            schedule_request(self._enter_followup_delay, "followup")
 
     def _prune_event_times(self, now: float) -> None:
         cutoff = now - self._dedup_interval
@@ -199,3 +264,8 @@ class EventDispatcher:
 
     def shutdown(self) -> None:
         self._cancel_debounce()
+        with self._lock:
+            timers = list(self._enter_timers)
+            self._enter_timers.clear()
+        for timer in timers:
+            timer.cancel()

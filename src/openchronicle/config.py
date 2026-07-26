@@ -55,6 +55,9 @@ class CaptureConfig:
             "com.microsoft.VSCode",
         ]
     )
+    # User interaction signals from these apps are discarded before disk/log
+    # persistence. Bundle IDs are exact matches.
+    excluded_signal_bundle_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -255,6 +258,8 @@ screenshot_jpeg_quality = 80
 ax_depth = 100                # Electron apps (Claude Desktop, VS Code, Slack) have deep DOM; 8 only reaches the chrome
 ax_timeout_seconds = 3
 enable_electron_accessibility = true
+# Exact bundle IDs whose UserEnter signals must be discarded before persistence.
+excluded_signal_bundle_ids = []
 electron_accessibility_bundles = ["com.microsoft.VSCode"]
 
 [timeline]

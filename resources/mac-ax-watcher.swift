@@ -18,6 +18,47 @@ import AppKit
 import ApplicationServices
 import Foundation
 
+let kPrivacyPolicyVersion = 1
+
+struct PrivacyPolicy {
+    let version: Int
+    let excludedBundleIds: Set<String>
+    let loaded: Bool
+}
+
+func loadPrivacyPolicy(arguments: [String]) -> PrivacyPolicy {
+    if arguments.contains("--self-test") {
+        return PrivacyPolicy(
+            version: kPrivacyPolicyVersion,
+            excludedBundleIds: [],
+            loaded: true
+        )
+    }
+    var version: Int?
+    var excluded = Set<String>()
+    var index = 1
+    while index < arguments.count {
+        let argument = arguments[index]
+        if argument == "--privacy-policy-version", index + 1 < arguments.count {
+            version = Int(arguments[index + 1])
+            index += 2
+        } else if argument == "--exclude-bundle", index + 1 < arguments.count {
+            let bundleId = arguments[index + 1]
+            if !bundleId.isEmpty { excluded.insert(bundleId) }
+            index += 2
+        } else {
+            index += 1
+        }
+    }
+    return PrivacyPolicy(
+        version: version ?? -1,
+        excludedBundleIds: excluded,
+        loaded: version == kPrivacyPolicyVersion
+    )
+}
+
+let privacyPolicy = loadPrivacyPolicy(arguments: CommandLine.arguments)
+
 // MARK: - Event Output
 
 /// Thread-safe JSON line writer to stdout
@@ -150,6 +191,31 @@ func getWindowTitle(_ appElement: AXUIElement) -> String {
     // swiftlint:disable:next force_cast
     let winEl = window as! AXUIElement
     return axString(winEl, kAXTitleAttribute as String) ?? ""
+}
+
+/// Stable structural identity for the focused window when AX exposes its
+/// numeric window id. Falls back to bundle+pid without using a title.
+func focusedWindowIdentity(
+    _ appElement: AXUIElement,
+    bundleId: String,
+    pid: pid_t
+) -> (value: String, confidence: String) {
+    var windowRef: CFTypeRef?
+    let windowError = AXUIElementCopyAttributeValue(
+        appElement, kAXFocusedWindowAttribute as CFString, &windowRef
+    )
+    if windowError == .success, let rawWindow = windowRef {
+        // swiftlint:disable:next force_cast
+        let window = rawWindow as! AXUIElement
+        var numberRef: CFTypeRef?
+        let numberError = AXUIElementCopyAttributeValue(
+            window, "AXWindowNumber" as CFString, &numberRef
+        )
+        if numberError == .success, let number = numberRef as? NSNumber {
+            return ("\(bundleId):\(pid):\(number.int64Value)", "high")
+        }
+    }
+    return ("\(bundleId):\(pid)", "low")
 }
 
 // MARK: - Interaction Tapper
@@ -333,19 +399,35 @@ final class InteractionTapper {
         // variants, so it must be handled before shortcut filtering.
         if let variant = keyVariant {
             let signalID = UUID().uuidString.lowercased()
+            let correlationID = UUID().uuidString.lowercased()
             let flags = event.flags
             let modifiers = enterModifierNames(flags)
 
             var appInfo: (pid: pid_t, name: String, bundleId: String) = (0, "", "")
             var target: [String: Any] = [:]
             var targetStatus = "app_unavailable"
+            var windowIdentity = ""
+            var windowIdentityConfidence = "low"
             if let front = NSWorkspace.shared.frontmostApplication {
                 appInfo = (
                     front.processIdentifier,
                     front.localizedName ?? "",
                     front.bundleIdentifier ?? ""
                 )
+                if privacyPolicy.excludedBundleIds.contains(appInfo.bundleId) {
+                    // Block before flushText so excluded-app text never reaches
+                    // stdout. Python repeats the check as defense in depth.
+                    discardPendingText()
+                    return
+                }
                 let appElement = AXUIElementCreateApplication(appInfo.pid)
+                let identity = focusedWindowIdentity(
+                    appElement,
+                    bundleId: appInfo.bundleId,
+                    pid: appInfo.pid
+                )
+                windowIdentity = identity.value
+                windowIdentityConfidence = identity.confidence
                 if let element = focusedElement(appElement) {
                     if isSecureElement(element) {
                         targetStatus = "secure_input"
@@ -360,11 +442,17 @@ final class InteractionTapper {
 
             // Preserve event order: any pending text belongs before the Enter.
             // When no text is pending flushText is intentionally a no-op.
-            flushText(reason: "enter", associationID: signalID)
+            flushText(
+                reason: "enter",
+                correlationID: correlationID,
+                relatedSignalID: signalID
+            )
 
             writer.write(event: [
                 "event_type": "UserEnter",
                 "signal_id": signalID,
+                "correlation_id": correlationID,
+                "privacy_policy_version": privacyPolicy.version,
                 "pid": appInfo.pid,
                 "app_name": appInfo.name,
                 "bundle_id": appInfo.bundleId,
@@ -376,6 +464,8 @@ final class InteractionTapper {
                 "modifiers": modifiers,
                 "input_target": target,
                 "input_target_status": targetStatus,
+                "window_identity": windowIdentity,
+                "window_identity_confidence": windowIdentityConfidence,
                 "semantic_intent": "unknown",
             ])
             return
@@ -450,7 +540,22 @@ final class InteractionTapper {
 
     /// Emit a pending ``UserTextInput`` event if one is buffered. Safe to
     /// call from any thread; idempotent when there's nothing to flush.
-    func flushText(reason: String, associationID: String? = nil) {
+    func discardPendingText() {
+        textLock.lock()
+        typingStartedAt = nil
+        typingElement = nil
+        typingApp = (0, "", "")
+        typingWindowTitle = ""
+        textFlushTimer?.cancel()
+        textFlushTimer = nil
+        textLock.unlock()
+    }
+
+    func flushText(
+        reason: String,
+        correlationID: String? = nil,
+        relatedSignalID: String? = nil
+    ) {
         textLock.lock()
         guard typingStartedAt != nil else {
             textLock.unlock()
@@ -472,6 +577,10 @@ final class InteractionTapper {
         textFlushTimer = nil
         textLock.unlock()
 
+        if privacyPolicy.excludedBundleIds.contains(app.bundleId) {
+            return
+        }
+
         var elementDict: [String: Any] = [:]
         if let el = element {
             elementDict = describeElement(el)
@@ -490,6 +599,8 @@ final class InteractionTapper {
 
         var textEvent: [String: Any] = [
             "event_type": "UserTextInput",
+            "event_id": UUID().uuidString.lowercased(),
+            "privacy_policy_version": privacyPolicy.version,
             "pid": app.pid,
             "app_name": app.name,
             "bundle_id": app.bundleId,
@@ -500,8 +611,11 @@ final class InteractionTapper {
                 "element": elementDict,
             ],
         ]
-        if let signalID = associationID {
-            textEvent["signal_id"] = signalID
+        if let correlationID = correlationID {
+            textEvent["correlation_id"] = correlationID
+        }
+        if let relatedSignalID = relatedSignalID {
+            textEvent["related_signal_id"] = relatedSignalID
         }
         writer.write(event: textEvent)
     }
@@ -847,6 +961,9 @@ func runEnterSelfTests() -> Bool {
 
 if CommandLine.arguments.contains("--self-test") {
     exit(runEnterSelfTests() ? 0 : 1)
+} else if !privacyPolicy.loaded {
+    fputs("Privacy policy missing or unsupported; watcher refusing to start\n", stderr)
+    exit(3)
 } else {
     main()
 }

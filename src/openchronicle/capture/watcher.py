@@ -22,6 +22,7 @@ from typing import Any
 
 from ..logger import get
 from .ax_capture import _maybe_compile
+from .signal_store import PRIVACY_POLICY_VERSION
 
 logger = get("openchronicle.capture")
 
@@ -73,12 +74,20 @@ class AXWatcherProcess:
     The callback runs on the reader thread — keep it fast and thread-safe.
     """
 
-    def __init__(self, *, max_reconnect_delay: float = 60.0) -> None:
+    def __init__(
+        self,
+        *,
+        excluded_bundle_ids: set[str] | None = None,
+        privacy_policy_version: int = PRIVACY_POLICY_VERSION,
+        max_reconnect_delay: float = 60.0,
+    ) -> None:
         self._watcher_path = _resolve_watcher_path()
         self._callback: Callable[[dict[str, Any]], None] | None = None
         self._process: subprocess.Popen | None = None
         self._reader_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        self._excluded_bundle_ids = sorted(excluded_bundle_ids or set())
+        self._privacy_policy_version = privacy_policy_version
         self._max_reconnect_delay = max_reconnect_delay
 
     @property
@@ -157,8 +166,15 @@ class AXWatcherProcess:
         if not self._watcher_path:
             return
         try:
+            command = [
+                str(self._watcher_path),
+                "--privacy-policy-version",
+                str(self._privacy_policy_version),
+            ]
+            for bundle_id in self._excluded_bundle_ids:
+                command.extend(["--exclude-bundle", bundle_id])
             self._process = subprocess.Popen(
-                [str(self._watcher_path)],
+                command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,
@@ -197,6 +213,9 @@ class AXWatcherProcess:
             rc = self._process.wait()
             if rc == 2:
                 logger.error("Accessibility permission not granted — watcher won't restart")
+                self._stop_event.set()
+            elif rc == 3:
+                logger.error("Watcher privacy policy unavailable — refusing unsafe restart")
                 self._stop_event.set()
             elif rc != 0:
                 logger.warning("AX watcher exited with code %d", rc)

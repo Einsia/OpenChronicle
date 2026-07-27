@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fcntl
 import hashlib
 import json
 import queue
 import threading
 import time
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,7 +22,7 @@ from ..logger import get
 from ..store import fts as fts_store
 from . import ax_capture, s1_parser, screenshot, window_meta
 from .event_dispatcher import EventDispatcher
-from .signal_store import SignalStore
+from .signal_store import CAPTURE_SCHEMA_VERSION, SignalStore
 from .watcher import AXWatcherProcess
 
 logger = get("openchronicle.capture")
@@ -35,6 +37,32 @@ _AX_RETRY_EVENTS = {
 _AX_RETRY_DELAYS = (0.15, 0.35)
 
 
+class CaptureDaemonAlreadyRunning(RuntimeError):
+    """Raised when another capture daemon owns the same data root."""
+
+
+class _CaptureDaemonLock:
+    def __init__(self) -> None:
+        self._handle: Any = None
+
+    def acquire(self) -> None:
+        paths.ensure_dirs()
+        self._handle = paths.capture_daemon_lock_file().open("a+")
+        try:
+            fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            self._handle.close()
+            self._handle = None
+            raise CaptureDaemonAlreadyRunning("already_running") from exc
+
+    def release(self) -> None:
+        if self._handle is None:
+            return
+        fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+        self._handle.close()
+        self._handle = None
+
+
 def _now_iso() -> str:
     return datetime.now(UTC).astimezone().isoformat(timespec="milliseconds")
 
@@ -47,22 +75,41 @@ def _normalize_title(value: Any) -> str:
     return " ".join(str(value or "").split())
 
 
-def _snapshot_window_meta(ax_tree: dict[str, Any]) -> dict[str, str]:
+def _snapshot_window_meta(ax_tree: dict[str, Any]) -> dict[str, Any]:
     apps = ax_tree.get("apps") or []
     app = next((item for item in apps if item.get("is_frontmost")), None)
     if app is None:
         app = apps[0] if apps else None
     if not isinstance(app, dict):
-        return {"app_name": "", "title": "", "bundle_id": ""}
+        return {
+            "app_name": "",
+            "title": "",
+            "bundle_id": "",
+            "pid": 0,
+            "window_identity": "",
+            "window_identity_confidence": "low",
+        }
 
     windows = app.get("windows") or []
     window = next((item for item in windows if item.get("focused")), None)
     if window is None:
         window = windows[0] if windows else None
+    bundle_id = str(app.get("bundle_id") or "")
+    pid = app.get("pid") if isinstance(app.get("pid"), int) else 0
+    window_number = window.get("window_number") if isinstance(window, dict) else None
+    if isinstance(window_number, int):
+        window_identity = f"{bundle_id}:{pid}:{window_number}"
+        confidence = "high"
+    else:
+        window_identity = f"{bundle_id}:{pid}" if bundle_id else ""
+        confidence = "low"
     return {
         "app_name": _normalize_title(app.get("name")),
         "title": _normalize_title(window.get("title")) if isinstance(window, dict) else "",
-        "bundle_id": str(app.get("bundle_id") or ""),
+        "bundle_id": bundle_id,
+        "pid": pid,
+        "window_identity": window_identity,
+        "window_identity_confidence": confidence,
     }
 
 
@@ -166,10 +213,18 @@ def _build_capture(
         logger.info("capture skipped (paused)")
         return None
 
+    excluded_bundles = set(cfg.excluded_signal_bundle_ids)
+    if excluded_bundles:
+        active = window_meta.active_window()
+        if active.bundle_id in excluded_bundles:
+            logger.info("capture skipped (privacy excluded app)")
+            return None
+
     ts = _now_iso()
     out: dict[str, Any] = {
         "timestamp": ts,
         "schema_version": 2,
+        "capture_schema_version": CAPTURE_SCHEMA_VERSION,
         "trigger": trigger or {"event_type": "heartbeat"},
     }
 
@@ -187,6 +242,9 @@ def _build_capture(
 
     snapshot_meta = _snapshot_window_meta(out.get("ax_tree") or {})
     bundle_id = snapshot_meta["bundle_id"]
+    if bundle_id in excluded_bundles:
+        logger.info("capture skipped (privacy excluded AX snapshot)")
+        return None
     app_name = snapshot_meta["app_name"]
     title = snapshot_meta["title"]
     title_source = "ax_snapshot" if title else "unavailable"
@@ -217,6 +275,9 @@ def _build_capture(
         "bundle_id": bundle_id,
         "title_source": title_source,
         "sampled_at": ts,
+        "pid": snapshot_meta["pid"],
+        "window_identity": snapshot_meta["window_identity"],
+        "window_identity_confidence": snapshot_meta["window_identity_confidence"],
     }
 
     if cfg.include_screenshot:
@@ -238,7 +299,7 @@ def _build_capture(
 def _write_capture(out: dict[str, Any]) -> Path:
     """Persist a built capture dict to the buffer, index it for search, and log."""
     ts = out["timestamp"]
-    path = paths.capture_buffer_dir() / f"{_safe_filename(ts)}.json"
+    path = paths.capture_buffer_dir() / f"{_safe_filename(ts)}-{uuid.uuid4().hex}.json"
     path.write_text(json.dumps(out, ensure_ascii=False))
     _index_capture(path.stem, out)
     meta = out.get("window_meta") or {}
@@ -377,6 +438,13 @@ class _CaptureRunner:
         )
         self._worker.start()
 
+    def context_snapshot_ref(self, bundle_id: str) -> str | None:
+        """Return the latest same-app Snapshot ref for key-down-time context."""
+        with self._lock:
+            if bundle_id and bundle_id == self._last_snapshot_bundle:
+                return self._last_snapshot_ref
+            return None
+
     def stop_worker(self, *, timeout: float = 5.0) -> None:
         """Drain the queue and join the worker thread."""
         if self._worker is None:
@@ -395,25 +463,52 @@ class _CaptureRunner:
                 return
             self.run(item)
 
-    def run(self, trigger: dict[str, Any] | None) -> None:
+    def run(self, trigger: dict[str, Any] | None) -> dict[str, Any]:
         # Serialize so two near-simultaneous triggers don't double-capture.
         with self._lock:
-            signal_id = str((trigger or {}).get("signal_id") or "")
+            capture_trigger = dict(trigger or {})
+            completion = capture_trigger.pop("_capture_complete", None)
+            signal_id = str(capture_trigger.get("signal_id") or "")
+            context_snapshot_ref = self._last_snapshot_ref
+            outcome: dict[str, Any]
             try:
-                out = _build_capture(self._cfg, self._provider, trigger)
+                out = _build_capture(self._cfg, self._provider, capture_trigger)
                 if out is None:
-                    self._update_signal(signal_id, "capture_unavailable")
-                    return
+                    outcome = {
+                        "status": "capture_unavailable",
+                        "quality_status": "degraded",
+                        "error_reason": "capture_unavailable",
+                        "context_snapshot_ref": context_snapshot_ref,
+                    }
+                    self._finish_capture(signal_id, outcome, completion)
+                    return outcome
                 meta = out.get("window_meta") or {}
                 snapshot_bundle = str(meta.get("bundle_id") or "")
-                trigger_bundle = str((trigger or {}).get("bundle_id") or "")
+                trigger_bundle = str(capture_trigger.get("bundle_id") or "")
+                trigger_window = str(capture_trigger.get("window_identity") or "")
+                snapshot_window = str(meta.get("window_identity") or "")
+                trigger_confidence = str(
+                    capture_trigger.get("window_identity_confidence") or "low"
+                )
                 if signal_id and (
                     not trigger_bundle
                     or not snapshot_bundle
                     or trigger_bundle != snapshot_bundle
+                    or (
+                        trigger_confidence == "high"
+                        and trigger_window
+                        and snapshot_window
+                        and trigger_window != snapshot_window
+                    )
                 ):
-                    self._update_signal(signal_id, "app_changed")
-                    return
+                    outcome = {
+                        "status": "app_changed",
+                        "quality_status": "failed",
+                        "error_reason": "bundle_changed",
+                        "context_snapshot_ref": context_snapshot_ref,
+                    }
+                    self._finish_capture(signal_id, outcome, completion)
+                    return outcome
                 fingerprint = _content_fingerprint(out)
                 if fingerprint == self._last_fingerprint:
                     logger.debug(
@@ -427,38 +522,100 @@ class _CaptureRunner:
                         and self._last_snapshot_ref
                         and snapshot_bundle == self._last_snapshot_bundle
                     ):
-                        self._update_signal(
-                            signal_id, "reused", snapshot_ref=self._last_snapshot_ref
-                        )
+                        outcome = {
+                            "status": "reused",
+                            "quality_status": "good",
+                            "snapshot_ref": self._last_snapshot_ref,
+                            "context_snapshot_ref": context_snapshot_ref,
+                        }
                     else:
-                        self._update_signal(signal_id, "duplicate_without_ref")
-                    return
+                        outcome = {
+                            "status": "unchanged",
+                            "quality_status": "degraded",
+                            "error_reason": "duplicate_without_ref",
+                            "context_snapshot_ref": context_snapshot_ref,
+                        }
+                    self._finish_capture(signal_id, outcome, completion)
+                    return outcome
                 self._last_fingerprint = fingerprint
                 path = _write_capture(out)
                 self._last_snapshot_ref = path.name
                 self._last_snapshot_bundle = snapshot_bundle
-                self._update_signal(signal_id, "captured", snapshot_ref=path.name)
+                outcome = {
+                    "status": "new",
+                    "quality_status": "good",
+                    "snapshot_ref": path.name,
+                    "context_snapshot_ref": context_snapshot_ref,
+                }
+                self._finish_capture(signal_id, outcome, completion)
                 if self._pre_capture_hook is not None and trigger is not None:
                     try:
                         self._pre_capture_hook(trigger)
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("pre_capture_hook failed: %s", exc)
+                return outcome
             except Exception as exc:  # noqa: BLE001
-                self._update_signal(signal_id, "capture_failed")
+                outcome = {
+                    "status": "unresolved",
+                    "quality_status": "failed",
+                    "error_reason": type(exc).__name__,
+                    "context_snapshot_ref": context_snapshot_ref,
+                }
+                self._finish_capture(signal_id, outcome, completion)
                 logger.error("capture failed: %s", exc, exc_info=True)
+                return outcome
 
     def run_threaded(self, trigger: dict[str, Any] | None) -> None:
         """Enqueue a capture for the worker thread; drop with a warning if full."""
+        trigger_data = trigger or {}
+        excluded_bundles = set(self._cfg.excluded_signal_bundle_ids)
+        if (
+            trigger is not None
+            and not trigger_data.get("signal_id")
+            and excluded_bundles
+            and window_meta.active_window().bundle_id in excluded_bundles
+        ):
+            # A stale event from another app can arrive after the user switches
+            # into an excluded app. Drop it before queueing so capture logging
+            # cannot cause a Terminal AXValueChanged feedback loop. Signal-
+            # linked requests still run so their attempt ledger is finalized.
+            return
         try:
             self._queue.put_nowait(trigger)
         except queue.Full:
             signal_id = str((trigger or {}).get("signal_id") or "")
-            self._update_signal(signal_id, "queue_full")
+            completion = (trigger or {}).get("_capture_complete")
+            outcome = {
+                "status": "deferred_queue_full",
+                "quality_status": "failed",
+                "error_reason": "queue_full",
+            }
+            self._finish_capture(signal_id, outcome, completion)
             logger.warning(
                 "capture queue full (%d pending); dropping trigger=%s",
                 self._queue.qsize(),
                 (trigger or {}).get("event_type") if trigger else "heartbeat",
             )
+
+    def _finish_capture(
+        self,
+        signal_id: str,
+        outcome: dict[str, Any],
+        completion: Any,
+    ) -> None:
+        if callable(completion):
+            completion(outcome)
+            return
+        compatibility = {
+            "new": "captured",
+            "reused": "reused",
+            "unchanged": "duplicate_without_ref",
+            "deferred_queue_full": "queue_full",
+            "app_changed": "app_changed",
+            "capture_unavailable": "capture_unavailable",
+            "unresolved": "capture_failed",
+        }
+        self._update_signal(signal_id, compatibility.get(str(outcome.get("status")), "capture_failed"), snapshot_ref=outcome.get("snapshot_ref"))
 
     def _update_signal(
         self,
@@ -492,6 +649,8 @@ async def run_forever(
     timer isn't refreshed by a screen that isn't changing (e.g. the lock
     screen overnight).
     """
+    daemon_lock = _CaptureDaemonLock()
+    daemon_lock.acquire()
     provider = ax_capture.create_provider(
         depth=cfg.ax_depth,
         timeout=cfg.ax_timeout_seconds,
@@ -503,6 +662,12 @@ async def run_forever(
         logger.warning("AX capture unavailable: %s", getattr(provider, "reason", "unknown reason"))
 
     signal_store = SignalStore(excluded_bundle_ids=set(cfg.excluded_signal_bundle_ids))
+    recoverable_signal_ids = signal_store.recover_incomplete()
+    if recoverable_signal_ids:
+        logger.info(
+            "signal recovery candidates deferred until context verification: count=%d",
+            len(recoverable_signal_ids),
+        )
     runner = _CaptureRunner(
         cfg,
         provider,
@@ -519,11 +684,14 @@ async def run_forever(
         runner.run_threaded(trigger)
 
     if cfg.event_driven:
-        watcher = AXWatcherProcess()
+        watcher = AXWatcherProcess(
+            excluded_bundle_ids=set(cfg.excluded_signal_bundle_ids),
+        )
         if watcher.available:
             dispatcher = EventDispatcher(
                 _on_capture,
                 signal_store=signal_store,
+                context_snapshot_ref_fn=runner.context_snapshot_ref,
                 debounce_seconds=cfg.debounce_seconds,
                 min_capture_gap_seconds=cfg.min_capture_gap_seconds,
                 dedup_interval_seconds=cfg.dedup_interval_seconds,
@@ -531,6 +699,10 @@ async def run_forever(
             )
             watcher.on_event(dispatcher.on_event)
             watcher.start()
+            for signal_id in recoverable_signal_ids:
+                signal = signal_store.read(signal_id)
+                if signal is not None:
+                    dispatcher.recover_signal(signal)
             logger.info("event-driven capture started")
         else:
             logger.warning("AX watcher unavailable — falling back to heartbeat-only captures")
@@ -568,6 +740,7 @@ async def run_forever(
         if dispatcher is not None:
             dispatcher.shutdown()
         runner.stop_worker()
+        daemon_lock.release()
 
 
 def cleanup_buffer(

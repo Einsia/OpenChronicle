@@ -52,7 +52,7 @@ def test_dispatcher_preserves_safe_target_metadata_only() -> None:
     ]
 
 
-def test_text_input_preserves_enter_association_id() -> None:
+def test_text_input_preserves_v2_enter_relationship() -> None:
     captures: list[dict] = []
     dispatcher = EventDispatcher(
         captures.append,
@@ -63,22 +63,33 @@ def test_text_input_preserves_enter_association_id() -> None:
     dispatcher.on_event(
         {
             "event_type": "UserTextInput",
-            "signal_id": "enter-association",
+            "event_id": "text-event",
+            "correlation_id": "interaction",
+            "related_signal_id": "enter-association",
             "bundle_id": "com.apple.TextEdit",
             "details": {"reason": "enter"},
         }
     )
 
-    assert captures[0]["signal_id"] == "enter-association"
+    assert captures[0]["event_id"] == "text-event"
+    assert captures[0]["correlation_id"] == "interaction"
+    assert captures[0]["related_signal_id"] == "enter-association"
 
 
 def test_user_enter_persists_before_capture_and_bypasses_dedup(ac_root) -> None:
     captures: list[dict] = []
+
+    def capture(trigger: dict) -> None:
+        captures.append(trigger)
+        trigger["_capture_complete"](
+            {"status": "new", "quality_status": "good", "snapshot_ref": "shared.json"}
+        )
+
     store = SignalStore()
     dispatcher = EventDispatcher(
-        captures.append,
+        capture,
         signal_store=store,
-        enter_capture_delay_seconds=0,
+        enter_capture_delay_seconds=0.05,
         enter_followup_delay_seconds=None,
         dedup_interval_seconds=60,
         same_window_dedup_seconds=60,
@@ -101,19 +112,26 @@ def test_user_enter_persists_before_capture_and_bypasses_dedup(ac_root) -> None:
         )
 
     deadline = time.monotonic() + 1
-    while len(captures) < 5 and time.monotonic() < deadline:
+    while len(captures) < 1 and time.monotonic() < deadline:
         time.sleep(0.01)
     dispatcher.shutdown()
 
     assert len(list((ac_root / "signal-buffer").glob("*.json"))) == 5
-    assert len(captures) == 5
-    assert {capture["signal_id"] for capture in captures} == {
+    assert len(captures) == 1
+    assert set(captures[0]["member_signal_ids"]) == {
         "sig-0",
         "sig-1",
         "sig-2",
         "sig-3",
         "sig-4",
     }
+    for index in range(5):
+        signal = json.loads(
+            (ac_root / "signal-buffer" / f"sig-{index}.json").read_text()
+        )
+        assert signal["post_capture_status"] == "new"
+        assert signal["result_snapshot_ref"] == "shared.json"
+        assert signal["capture_attempts"][0]["association_mode"] == "coalesced"
 
 
 def test_duplicate_signal_id_does_not_request_second_capture(ac_root) -> None:
@@ -150,12 +168,20 @@ def test_enter_followup_can_upgrade_late_snapshot(ac_root) -> None:
         attempt = trigger["enter_attempt"]
         attempts.append(attempt)
         if attempt == "initial":
-            store.update_snapshot(
-                trigger["signal_id"], status="reused", snapshot_ref="before.json"
+            trigger["_capture_complete"](
+                {
+                    "status": "reused",
+                    "quality_status": "good",
+                    "snapshot_ref": "before.json",
+                }
             )
         else:
-            store.update_snapshot(
-                trigger["signal_id"], status="captured", snapshot_ref="after.json"
+            trigger["_capture_complete"](
+                {
+                    "status": "new",
+                    "quality_status": "good",
+                    "snapshot_ref": "after.json",
+                }
             )
 
     dispatcher = EventDispatcher(
@@ -179,6 +205,113 @@ def test_enter_followup_can_upgrade_late_snapshot(ac_root) -> None:
     dispatcher.shutdown()
 
     signal = json.loads((ac_root / "signal-buffer" / "late-update.json").read_text())
-    assert attempts == ["initial", "followup"]
-    assert signal["snapshot_status"] == "captured"
-    assert signal["snapshot_ref"] == "after.json"
+    assert attempts == ["initial", "follow_up"]
+    assert signal["post_capture_status"] == "new"
+    assert signal["result_snapshot_ref"] == "after.json"
+
+
+def test_high_quality_primary_cancels_followup(ac_root) -> None:
+    attempts: list[str] = []
+
+    def capture(trigger: dict) -> None:
+        attempts.append(trigger["enter_attempt"])
+        trigger["_capture_complete"](
+            {"status": "new", "quality_status": "good", "snapshot_ref": "new.json"}
+        )
+
+    dispatcher = EventDispatcher(
+        capture,
+        signal_store=SignalStore(),
+        enter_capture_delay_seconds=0,
+        enter_followup_delay_seconds=0.02,
+    )
+    dispatcher.on_event(
+        {
+            "event_type": "UserEnter",
+            "signal_id": "primary-good",
+            "bundle_id": "com.apple.TextEdit",
+            "key_variant": "return",
+        }
+    )
+    time.sleep(0.08)
+    dispatcher.shutdown()
+
+    assert attempts == ["initial"]
+
+
+def test_shutdown_marks_unstarted_primary_deferred(ac_root) -> None:
+    dispatcher = EventDispatcher(
+        lambda trigger: None,
+        signal_store=SignalStore(),
+        enter_capture_delay_seconds=10,
+        enter_followup_delay_seconds=None,
+    )
+    dispatcher.on_event(
+        {
+            "event_type": "UserEnter",
+            "signal_id": "shutdown-pending",
+            "bundle_id": "com.apple.TextEdit",
+            "key_variant": "return",
+        }
+    )
+    dispatcher.shutdown()
+
+    signal = json.loads(
+        (ac_root / "signal-buffer" / "shutdown-pending.json").read_text()
+    )
+    assert signal["post_capture_status"] == "deferred_shutdown"
+    assert signal["capture_attempts"][-1]["status"] == "cancelled_shutdown"
+
+
+def test_capture_group_allows_only_one_natural_event_attempt(ac_root) -> None:
+    attempts: list[str] = []
+
+    def capture(trigger: dict) -> None:
+        attempt = trigger["enter_attempt"]
+        attempts.append(attempt)
+        if attempt == "follow_up":
+            outcome = {
+                "status": "new",
+                "quality_status": "good",
+                "snapshot_ref": "after.json",
+            }
+        else:
+            outcome = {
+                "status": "reused",
+                "quality_status": "good",
+                "snapshot_ref": "before.json",
+            }
+        trigger["_capture_complete"](outcome)
+
+    dispatcher = EventDispatcher(
+        capture,
+        signal_store=SignalStore(),
+        enter_capture_delay_seconds=0,
+        enter_followup_delay_seconds=0.08,
+        debounce_seconds=10,
+    )
+    dispatcher.on_event(
+        {
+            "event_type": "UserEnter",
+            "signal_id": "natural-once",
+            "pid": 42,
+            "bundle_id": "com.apple.TextEdit",
+            "key_variant": "return",
+        }
+    )
+    deadline = time.monotonic() + 1
+    while attempts != ["initial"] and time.monotonic() < deadline:
+        time.sleep(0.005)
+    natural = {
+        "event_type": "AXValueChanged",
+        "pid": 42,
+        "bundle_id": "com.apple.TextEdit",
+    }
+    dispatcher.on_event(natural)
+    dispatcher.on_event(natural)
+    deadline = time.monotonic() + 1
+    while len(attempts) < 3 and time.monotonic() < deadline:
+        time.sleep(0.005)
+    dispatcher.shutdown()
+
+    assert attempts == ["initial", "natural_event", "follow_up"]

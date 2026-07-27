@@ -25,6 +25,10 @@ def signal_buffer_dir() -> Path:
     return root() / "signal-buffer"
 
 
+def event_buffer_dir() -> Path:
+    return root() / "event-buffer"
+
+
 def logs_dir() -> Path:
     return root() / "logs"
 
@@ -41,6 +45,10 @@ def pid_file() -> Path:
     return root() / ".pid"
 
 
+def capture_daemon_lock_file() -> Path:
+    return root() / ".capture-daemon.lock"
+
+
 def paused_flag() -> Path:
     return root() / ".paused"
 
@@ -51,5 +59,12 @@ def writer_state() -> Path:
 
 
 def ensure_dirs() -> None:
-    for d in (root(), memory_dir(), capture_buffer_dir(), signal_buffer_dir(), logs_dir()):
+    for d in (
+        root(),
+        memory_dir(),
+        capture_buffer_dir(),
+        signal_buffer_dir(),
+        event_buffer_dir(),
+        logs_dir(),
+    ):
         d.mkdir(parents=True, exist_ok=True)

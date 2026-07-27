@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+import pytest
+
 from openchronicle.capture import scheduler
 from openchronicle.capture.signal_store import SignalStore
 from openchronicle.config import CaptureConfig
@@ -26,6 +28,54 @@ class _Provider:
         index = min(self.calls, len(self.snapshots) - 1)
         self.calls += 1
         return _Result(self.snapshots[index], {})
+
+
+def test_capture_daemon_singleton_lock(ac_root) -> None:
+    first = scheduler._CaptureDaemonLock()
+    second = scheduler._CaptureDaemonLock()
+    first.acquire()
+    try:
+        with pytest.raises(scheduler.CaptureDaemonAlreadyRunning, match="already_running"):
+            second.acquire()
+    finally:
+        first.release()
+
+
+def test_excluded_frontmost_app_is_blocked_at_capture_time(monkeypatch, ac_root) -> None:
+    provider = _Provider(
+        {
+            "apps": [
+                {
+                    "name": "TextEdit",
+                    "bundle_id": "com.apple.TextEdit",
+                    "is_frontmost": True,
+                    "windows": [{"title": "Private", "focused": True, "elements": []}],
+                }
+            ]
+        }
+    )
+    monkeypatch.setattr(
+        scheduler.window_meta,
+        "active_window",
+        lambda: scheduler.window_meta.WindowMeta(
+            app_name="TextEdit",
+            title="Private",
+            bundle_id="com.apple.TextEdit",
+        ),
+    )
+
+    out = scheduler._build_capture(
+        CaptureConfig(
+            include_screenshot=False,
+            excluded_signal_bundle_ids=["com.apple.TextEdit"],
+        ),
+        provider,
+        {"event_type": "UserMouseClick", "bundle_id": "com.apple.dock"},
+    )
+
+    assert out is None
+    assert provider.calls == 0
+    assert list((ac_root / "capture-buffer").glob("*.json")) == []
 
 
 def test_build_capture_prefers_snapshot_title(monkeypatch, ac_root) -> None:
@@ -380,9 +430,9 @@ def test_enter_reuses_identical_snapshot_without_losing_signal(monkeypatch, ac_r
 
     first = json.loads((ac_root / "signal-buffer" / "enter-1.json").read_text())
     second = json.loads((ac_root / "signal-buffer" / "enter-2.json").read_text())
-    assert first["snapshot_status"] == "captured"
-    assert second["snapshot_status"] == "reused"
-    assert second["snapshot_ref"] == first["snapshot_ref"]
+    assert first["post_capture_status"] == "new"
+    assert second["post_capture_status"] == "reused"
+    assert second["result_snapshot_ref"] == first["result_snapshot_ref"]
     assert len(list((ac_root / "capture-buffer").glob("*.json"))) == 1
 
 
@@ -426,6 +476,29 @@ def test_enter_does_not_associate_snapshot_after_app_switch(monkeypatch, ac_root
     )
 
     signal = json.loads((ac_root / "signal-buffer" / "switched.json").read_text())
-    assert signal["snapshot_status"] == "app_changed"
-    assert signal["snapshot_ref"] is None
+    assert signal["post_capture_status"] == "app_changed"
+    assert signal["result_snapshot_ref"] is None
     assert list((ac_root / "capture-buffer").glob("*.json")) == []
+
+
+def test_excluded_frontmost_app_is_dropped_before_capture_queue(
+    monkeypatch, ac_root
+) -> None:
+    runner = scheduler._CaptureRunner(
+        CaptureConfig(excluded_signal_bundle_ids=["com.apple.TextEdit"]),
+        _Provider({"apps": []}),
+    )
+    monkeypatch.setattr(
+        scheduler.window_meta,
+        "active_window",
+        lambda: type("ActiveWindow", (), {"bundle_id": "com.apple.TextEdit"})(),
+    )
+
+    runner.run_threaded(
+        {
+            "event_type": "AXValueChanged",
+            "bundle_id": "com.apple.Terminal",
+        }
+    )
+
+    assert runner._queue.empty()

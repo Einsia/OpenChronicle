@@ -357,6 +357,9 @@ func processWindow(_ window: AXUIElement, config: Config) -> [String: Any]? {
     var windowDict: [String: Any] = [
         "title": title,
     ]
+    if let windowNumber = axValue(window, "AXWindowNumber") as? NSNumber {
+        windowDict["window_number"] = windowNumber.int64Value
+    }
     if let subrole, !subrole.isEmpty { windowDict["subrole"] = subrole }
     if let description, !description.isEmpty { windowDict["description"] = description }
     if let identifier, !identifier.isEmpty { windowDict["identifier"] = identifier }

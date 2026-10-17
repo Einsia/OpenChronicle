@@ -215,6 +215,49 @@ openchronicle uninstall claude-code          # remove it
 
 `install` runs `claude mcp add --transport http -s user openchronicle http://127.0.0.1:8742/mcp` under the hood. Every invocation is idempotent — if an `openchronicle` entry already exists at the target scope, it's removed and re-registered with the current URL/transport. `uninstall` calls `claude mcp remove -s user openchronicle`; a missing entry is treated as success. Change scope on either command with `--scope {user,local,project}` — `uninstall` must match the scope `install` used.
 
+#### Optional: combine memory with current web research
+
+OpenChronicle can recall which public library you used in a project; a second MCP server can help check its latest release notes. [Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp) provides `web_search` and `web_fetch` for public web research. The anonymous endpoint needs no Parallel account or API key; search uses Fast mode. Free access is intended for exploration and light use, with rate limits.
+
+**Data boundary.** OpenChronicle still serves memory on localhost, but your MCP client and its model can read the tool results. Parallel receives the search terms and URLs sent to its tools. Do not forward private memory, raw captures, internal URLs, credentials, or personal details. The prompts below ask for approval before any web request; this is a conversation instruction, not an enforced data filter. Review each tool call before allowing it.
+
+After installing Claude Code and connecting OpenChronicle as above, run this from the project directory where you want web research available. Check `claude mcp list` first: if you already have a `parallel-search` entry, keep your existing configuration or choose a different unused name in all commands below.
+
+```bash
+claude mcp add --transport http --scope local parallel-search https://search.parallel.ai/mcp \
+  --header "User-Agent: OpenChronicle/0.1.0 (Claude Code research)"
+claude mcp get parallel-search
+```
+
+`local` scope stores this entry in your private Claude Code configuration for the current project. It does not edit OpenChronicle's config or replace other servers. See [Claude Code's MCP setup](https://code.claude.com/docs/en/mcp) for scope and tool permissions. Start a new Claude Code session in that directory and use `/mcp` to check that `openchronicle` and `parallel-search` are connected. Parallel should expose `web_search` and `web_fetch`; OpenChronicle should expose its memory tools. If either server fails to connect, resolve that before proceeding.
+
+Start with a memory-only request, replacing the project name:
+
+```text
+Use only OpenChronicle's search and read_memory to recall which public
+library I used for the Atlas project and any recorded version. Treat the
+memory as historical context, not evidence of the current release.
+Propose a search using only the public library name and version.
+Show me the exact proposed public query and wait for my approval.
+Do not call any web tools yet.
+```
+
+After reviewing and approving the query, continue:
+
+```text
+Use Parallel's web_search for the public query I approved, then web_fetch
+on relevant official release-note URLs. Do not send project names or
+other memory content. Compare those sources with the recalled version,
+cite the source URLs, and separate local memory from current web findings.
+If memory has no version or web lookup fails, say what is missing.
+```
+
+To remove just this optional server from the same project directory:
+
+```bash
+claude mcp remove --scope local parallel-search
+```
+
 ### Codex CLI
 
 ```bash
